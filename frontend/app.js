@@ -82,7 +82,7 @@
   var COSTS = { outline: 2, section: 1 };
   var KEY_STORAGE = 'lmp:key';
   var KEY_RE = /^lmp_[0-9a-f]{40}$/;
-  var account = { key: '', verified: false, checking: false, error: '', draft: '', balance: null, tier: '', status: '', resetsOn: '' };
+  var account = { key: '', verified: false, checking: false, error: '', draft: '', balance: null, tier: '', status: '', resetsOn: '', resend: { open: false, email: '', busy: false, message: '', error: '' } };
 
   var state = load() || freshState();
   var restored = !!(state.doc || state.input.topic);
@@ -278,7 +278,7 @@
   function signOut(message) {
     stopWriting(); cancelOutline();
     storeKey('');
-    account = { key: '', verified: false, checking: false, error: message || '', draft: '', balance: null, tier: '', status: '', resetsOn: '' };
+    account = { key: '', verified: false, checking: false, error: message || '', draft: '', balance: null, tier: '', status: '', resetsOn: '', resend: { open: false, email: '', busy: false, message: '', error: '' } };
     render();
   }
   function paintBalance() {
@@ -290,7 +290,7 @@
     c.title = 'Plan credits: ' + fmtNum(b.plan) + ', pack credits: ' + fmtNum(b.pack);
   }
   function fmtDate(iso) {
-    try { return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' }); } catch (e) { return iso; }
+    try { return new Date(iso + 'T00:00:00Z').toLocaleDateString('en-GB', { day: 'numeric', month: 'long', timeZone: 'UTC' }); } catch (e) { return iso; }
   }
   function accountBar() {
     var b = account.balance;
@@ -300,6 +300,37 @@
       h('span', { class: 'lmg-actions-spacer' }),
       button('Sign out', { kind: 'quiet', small: true, onClick: function () { signOut(''); } })
     ]);
+  }
+  // "Lost your key?": asks for a new key by email. The answer is always the same, whether or not the address has an account.
+  function resendBlock() {
+    var r = account.resend;
+    if (!r.open) {
+      return h('p', { class: 'lmg-help' }, ['Lost your key? ', h('button', { type: 'button', class: 'lmg-link lmg-linkbtn', 'data-action': 'resend-open', text: 'Send me a new one',
+        onClick: function () { r.open = true; render(); } }), '.']);
+    }
+    var input = h('input', { type: 'email', class: 'lmg-input', 'data-field': 'resend-email', placeholder: 'The email you bought with', value: r.email, autocomplete: 'email', 'aria-label': 'Your email address', disabled: r.busy });
+    input.addEventListener('input', function () { r.email = input.value; });
+    input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); sendResend(); } });
+    return h('div', { class: 'lmg-resend' }, [
+      h('p', { class: 'lmg-help', text: 'Enter the email you used when you bought. We will send a new access key; your old key stops working.' }),
+      input,
+      r.error ? notice({ kind: 'error', text: r.error }) : null,
+      r.message ? notice({ kind: 'info', text: r.message }) : null,
+      h('div', { class: 'lmg-actions' }, [button(r.busy ? 'Sending\u2026' : 'Send my new key', { busy: r.busy, disabled: r.busy, onClick: sendResend })])
+    ]);
+  }
+  function sendResend() {
+    var r = account.resend;
+    if (r.busy) return;
+    r.error = ''; r.message = '';
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(r.email).trim())) { r.error = 'Please enter a valid email address.'; render(); return; }
+    r.busy = true; render();
+    rawApi('resend-key', { email: String(r.email).trim() }).then(function (j) {
+      r.busy = false;
+      if (j && j.ok) r.message = j.message || 'If this email has an account, we just sent a new access key.';
+      else r.error = errorText(j, 'send a new key');
+      render();
+    });
   }
   function panelKey() {
     var input = h('input', {
@@ -318,7 +349,7 @@
           button(account.checking ? 'Checking your key\u2026' : 'Continue', { busy: account.checking, disabled: account.checking, onClick: function () { signIn(input.value); } })
         ]),
         h('p', { class: 'lmg-help' }, ['Don\u2019t have a key yet? ', plansLink(), '.']),
-        h('p', { class: 'lmg-help', text: 'Lost your key? Look for the email with the subject line about your access, or contact support.' })
+        resendBlock()
       ])
     ]);
   }
@@ -1941,6 +1972,7 @@
   function mockApi(path, body, signal) {
     return new Promise(function (resolve) {
       var t = setTimeout(function () {
+        if (path === 'resend-key') { resolve({ ok: true, message: 'If this email has an account, we just sent a new access key. It can take a minute; check your spam folder too. Your old key stops working.' }); return; }
         if (body.key !== 'lmp_demo') { resolve({ ok: false, code: 'invalid_key', message: 'That access key isn\u2019t valid. Check the email we sent you, or ask for a new key.' }); return; }
         if (path === 'session') { resolve({ ok: true, tier: 'Pro', status: 'active', balance: mockBal(), resetsOn: '2026-12-05', daily: { used: 0, limit: 100 } }); return; }
         if (path === 'outline') {
