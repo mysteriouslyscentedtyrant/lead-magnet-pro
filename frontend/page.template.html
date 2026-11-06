@@ -11,24 +11,20 @@
   <!-- Hero -->
   <section class="lmp-hero">
     <div class="lmp-wrap">
-      <a class="lmp-back" href="https://systeme.io/free-tools/">
-        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.5 5 7.5 10l5 5"/></svg>
-        All free tools
-      </a>
-      <span class="lmp-badge">Free tool · Beta</span>
+      <span class="lmp-badge">Pro · Beta</span>
       <h1 class="lmp-h1">Turn what you know into a lead magnet <span class="lmp-mark">in minutes</span></h1>
-      <p class="lmp-lede">Pick an ebook, guide or checklist, describe your audience, and AI writes it for you. Shape the outline, choose a design, add your brand and your link, then download a polished PDF.</p>
+      <p class="lmp-lede">Pick an ebook, guide or checklist, describe your audience, and AI writes it for you. Shape the outline, choose a design, add your brand and your link, then download a polished PDF. Enter your access key to start.</p>
       <ul class="lmp-chips">
         <li>Ebook, guide or checklist</li>
         <li>Written in any language</li>
-        <li>Free, no signup</li>
+        <li>Pay with credits, no per-file fee</li>
       </ul>
     </div>
   </section>
 
   <!-- The tool -->
   <section class="lmp-tool" aria-label="Lead magnet generator">
-    <div id="lead-magnet-generator" data-api="https://n8n.team-sio.com/webhook/lmg-pro" data-turnstile-sitekey="{{SITEKEY}}" data-pdf="server" style="min-height:520px;font-family:Outfit,system-ui,sans-serif">
+    <div id="lead-magnet-generator" data-api="https://n8n.team-sio.com/webhook/lmg-pro" data-pdf="server" style="min-height:520px;font-family:Outfit,system-ui,sans-serif">
       <p style="max-width:1040px;margin:56px auto;padding:0 24px;color:#5E6075">Loading the lead magnet generator…</p>
     </div>
   </section>
@@ -38,7 +34,7 @@
     <div class="lmp-wrap">
       <span class="lmp-eyebrow">How it works</span>
       <h2 class="lmp-h2">Four steps, a few minutes, one finished PDF.</h2>
-      <p class="lmp-intro">No signup and no design skills needed. The AI does the writing, and you decide what goes in at every step.</p>
+      <p class="lmp-intro">No design skills needed. Enter your access key, and the AI does the writing while you decide what goes in at every step.</p>
       <ol class="lmp-steps">
         <li class="lmp-step lmp-step--1">
           <span class="lmp-step-label">Step 01</span>
@@ -56,7 +52,7 @@
           <span class="lmp-step-label">Step 03</span>
           <span class="lmp-step-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4"/><path d="m6.3 6.3 2.1 2.1M15.6 15.6l2.1 2.1M6.3 17.7l2.1-2.1M15.6 8.4l2.1-2.1"/></svg></span>
           <h3>Let AI write</h3>
-          <p>Each section is written in seconds, with steps, examples and templates made for your audience.</p>
+          <p>Each section is written in seconds, with steps, examples and templates made for your audience. Every section costs 1 credit.</p>
         </li>
         <li class="lmp-step lmp-step--4">
           <span class="lmp-step-label">Step 04</span>
@@ -111,6 +107,53 @@
     </div>
   </section>
 
+  <!-- Plans and credits.
+       EDIT HERE: the plan names, credits and prices below are PLACEHOLDERS. Replace each [price] and set each
+       button's href to the matching systeme.io order form. Do not publish the page with placeholders. -->
+  <section class="lmp-section lmp-band" id="lmp-pricing">
+    <div class="lmp-wrap">
+      <span class="lmp-eyebrow lmp-eyebrow--blue">Plans and credits</span>
+      <h2 class="lmp-h2">Pay for what you create.</h2>
+      <p class="lmp-intro">Pick a monthly plan with credits included, or buy a credit pack when you need more. A typical lead magnet uses about 8 to 12 credits.</p>
+      <ul class="lmp-plans">
+        <li class="lmp-plan">
+          <h3>Starter</h3>
+          <p class="lmp-plan-credits">500 credits <span>per month</span></p>
+          <p class="lmp-plan-price">[price]<span> / month</span></p>
+          <p class="lmp-plan-note">Around 50 lead magnets a month.</p>
+          <a class="lmp-plan-btn" href="#">Choose Starter</a>
+        </li>
+        <li class="lmp-plan lmp-plan--feature">
+          <h3>Pro</h3>
+          <p class="lmp-plan-credits">1,000 credits <span>per month</span></p>
+          <p class="lmp-plan-price">[price]<span> / month</span></p>
+          <p class="lmp-plan-note">Around 100 lead magnets a month.</p>
+          <a class="lmp-plan-btn" href="#">Choose Pro</a>
+        </li>
+        <li class="lmp-plan">
+          <h3>Scale</h3>
+          <p class="lmp-plan-credits">5,000 credits <span>per month</span></p>
+          <p class="lmp-plan-price">[price]<span> / month</span></p>
+          <p class="lmp-plan-note">For agencies and course teams.</p>
+          <a class="lmp-plan-btn" href="#">Choose Scale</a>
+        </li>
+        <li class="lmp-plan lmp-plan--pack">
+          <h3>Credit pack</h3>
+          <p class="lmp-plan-credits">100 credits <span>one time</span></p>
+          <p class="lmp-plan-price">[price]</p>
+          <p class="lmp-plan-note">Never expires. Used after your monthly credits.</p>
+          <a class="lmp-plan-btn" href="#">Buy a pack</a>
+        </li>
+      </ul>
+      <ul class="lmp-credit-list">
+        <li><strong>Outline</strong> 2 credits</li>
+        <li><strong>Each section written or rewritten</strong> 1 credit</li>
+        <li><strong>Editing, brand, PDF download</strong> free</li>
+        <li><strong>If the AI fails</strong> your credits come back</li>
+      </ul>
+    </div>
+  </section>
+
   <!-- FAQ -->
   <section class="lmp-section">
     <div class="lmp-wrap">
@@ -118,8 +161,20 @@
       <h2 class="lmp-h2">Common questions.</h2>
       <div class="lmp-faq">
         <details>
-          <summary>Is it free?</summary>
-          <div class="lmp-answer"><p>Yes. There is no signup and no payment. To keep it free for everyone, each visitor can create a few lead magnets per hour.</p></div>
+          <summary>How do credits work?</summary>
+          <div class="lmp-answer"><p>A credit pays for about one AI call. An outline costs 2 credits and each section written or rewritten costs 1, so a typical lead magnet uses 8 to 12 credits. Editing, choosing a design and downloading the PDF are free.</p><p>You see your balance at the top of the tool at all times.</p></div>
+        </details>
+        <details>
+          <summary>What if the AI fails?</summary>
+          <div class="lmp-answer"><p>You get your credits back automatically. If a section fails once, the tool tries again by itself, and if it fails again the credit is returned and you can retry that section.</p></div>
+        </details>
+        <details>
+          <summary>Do unused credits roll over?</summary>
+          <div class="lmp-answer"><p>Monthly plan credits renew each month and do not roll over. Credits from a credit pack never expire, and they are used after your monthly credits.</p></div>
+        </details>
+        <details>
+          <summary>Where is my access key?</summary>
+          <div class="lmp-answer"><p>We email it when you subscribe or buy credits. Enter it once and this browser remembers it until you sign out. Keep it private: anyone with the key can spend your credits.</p></div>
         </details>
         <details>
           <summary>What can I create?</summary>

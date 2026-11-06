@@ -8,7 +8,7 @@ The free tool is a separate project. Nothing here changes it.
 
 ## Status
 
-Phase 1a: skeleton. The files are copied from the free tool with new names and **no behaviour change yet**. The page still carries the free tool's landing copy, so it must not be published until phase 1c.
+Phase 1c: the page now asks for an access key, shows the credit balance, charges up front (`/start`) and writes sections with the ticket it gets back. The Turnstile check is gone. The pricing section holds **placeholder prices**, so the page must not be published until phase 2c.
 
 ## Repo structure
 
@@ -23,7 +23,9 @@ scripts/    build_widget.py: builds the pinned systeme.io snippet
 
 | | Free tool | Pro (this repo) |
 |---|---|---|
-| App version | `0.5.2` | `0.1.0` (restarted for the fork) |
+| App version | `0.5.2` | `0.2.0` (restarted for the fork) |
+| Access | none (human check) | access key + credits; key kept in this browser (`lmp:key`) |
+| Saved work | `lmg:v1` | `lmp:v1` (separate key, same site) |
 | API base (`data-api`) | `.../webhook/lead-magnet` | `.../webhook/lmg-pro` (not live until phase 1b) |
 | Apify actor | `lead-magnet-pdf` | `lead-magnet-pro-pdf` (new, separate) |
 | Schema `$id` | free repo | this repo |
@@ -34,7 +36,13 @@ scripts/    build_widget.py: builds the pinned systeme.io snippet
 python3 scripts/build_widget.py --local out.html
 ```
 
-Builds a test page that uses mock answers and no AI calls. Open `out.html` in a browser.
+Builds a test page that uses mock answers and no AI calls. Open `out.html` in a browser and enter the demo key `lmp_demo` (170 credits).
+
+```
+python3 scripts/build_widget.py --live out-live.html
+```
+
+Builds a page that talks to the real API (`data-api`). Open it from your computer and enter your own access key.
 
 ## Releasing a new version
 
@@ -44,5 +52,5 @@ Builds a test page that uses mock answers and no AI calls. Open `out.html` in a 
 
 ## Coming next
 
-- Phase 1b: paid API workflow (key check, credits) in the backend repo.
-- Phase 1c: key screen, balance display and new page copy in this repo.
+- Phase 2a: billing workflow and `/resend-key` (the key screen links to it).
+- Phase 2c: real prices and order-form links in the pricing section, then publish.

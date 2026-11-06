@@ -13,8 +13,8 @@
   'use strict';
 
   var ROOT_ID = 'lead-magnet-generator';
-  var STORAGE_KEY = 'lmg:v1';
-  var VERSION = '0.1.0';
+  var STORAGE_KEY = 'lmp:v1';
+  var VERSION = '0.2.0';
 
   // ------------------------------------------------------------------ constants
   var FORMATS = {
@@ -72,12 +72,17 @@
     api: (root.getAttribute('data-api') || '').replace(/\/+$/, ''),
     mock: root.getAttribute('data-mock') === '1',
     concurrency: Math.max(1, Math.min(4, parseInt(root.getAttribute('data-concurrency'), 10) || 3)),
-    sitekey: (root.getAttribute('data-turnstile-sitekey') || '').trim(),
     // Inside the landing page (.lmg-page) the page has its own headline, so the tool skips its header.
     embedded: !!(root.closest && root.closest('.lmg-page')) || root.getAttribute('data-header') === 'off',
     // data-pdf="server": real one-click download through n8n + Apify. Otherwise the print window.
     pdfServer: root.getAttribute('data-pdf') === 'server'
   };
+
+  // Display only: the server decides the real charge. A credit is about one AI call.
+  var COSTS = { outline: 2, section: 1 };
+  var KEY_STORAGE = 'lmp:key';
+  var KEY_RE = /^lmp_[0-9a-f]{40}$/;
+  var account = { key: '', verified: false, checking: false, error: '', draft: '', balance: null, tier: '', status: '', resetsOn: '' };
 
   var state = load() || freshState();
   var restored = !!(state.doc || state.input.topic);
@@ -106,7 +111,6 @@
         s.doc.sections.forEach(function (x) { if (x.status === 'writing' || x.status === 'queued') x.status = 'outlined'; });
       }
       if (s.step > 3 && !s.doc) s.step = s.format ? 2 : 1;
-      if (typeof s.pass !== 'string' || s.pass.length > 300) s.pass = '';
       return s;
     } catch (e) { return null; }
   }
@@ -114,7 +118,7 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(function () {
       try {
-        var copy = { v: 1, step: state.step, format: state.format, input: state.input, doc: state.doc, pass: state.pass || '' };
+        var copy = { v: 1, step: state.step, format: state.format, input: state.input, doc: state.doc };
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(copy));
       } catch (e) { /* storage full or blocked: the tool still works, it just won't survive a refresh */ }
     }, 250);
@@ -204,7 +208,22 @@
   }
 
   // ------------------------------------------------------------------ API
+  // Every call carries the access key; every answer may carry the new balance.
   function api(path, body, signal) {
+    var withKey = Object.assign({}, body, account.key ? { key: account.key } : {});
+    return rawApi(path, withKey, signal).then(function (r) { absorb(r); return r; });
+  }
+  function absorb(r) {
+    if (!r) return;
+    if (r.balance && typeof r.balance.total === 'number') { account.balance = r.balance; paintBalance(); }
+    if (r.code === 'invalid_key' && account.verified) signOut('Your access key is not valid any more. Enter it again, or ask for a new one.');
+  }
+  function creditsText(n) { return fmtNum(n) + (n === 1 ? ' credit' : ' credits'); }
+  function plansLink() { return h('a', { class: 'lmg-link', href: '#lmp-pricing', text: 'See plans and credit packs' }); }
+  function failNotice(r, what) {
+    return { kind: 'error', text: errorText(r, what), action: r && r.code === 'insufficient_credits' ? plansLink() : null };
+  }
+  function rawApi(path, body, signal) {
     if (config.mock) return mockApi(path, body, signal);
     if (!config.api) return Promise.resolve({ ok: false, code: 'config', message: 'This tool is not connected yet: the data-api address is missing.' });
     var controller = new AbortController();
@@ -227,6 +246,81 @@
     if (r.code === 'network') return 'Can\'t reach the generator. Check your internet connection and try again.';
     if (r.code === 'timeout') return 'The generator took too long to answer. Please try again.';
     return r.message || ('We couldn\'t ' + what + ' right now. Please try again in a minute.');
+  }
+
+  // ------------------------------------------------------------------ access key
+  function validKeyFormat(k) { return KEY_RE.test(k) || (config.mock && k === 'lmp_demo'); }
+  function readKey() { try { var k = window.localStorage.getItem(KEY_STORAGE) || ''; return validKeyFormat(k) ? k : ''; } catch (e) { return ''; } }
+  function storeKey(k) { try { if (k) window.localStorage.setItem(KEY_STORAGE, k); else window.localStorage.removeItem(KEY_STORAGE); } catch (e) { /* the key then lasts until the page closes */ } }
+  function signIn(key, silent) {
+    key = String(key || '').trim();
+    account.draft = key;
+    if (!validKeyFormat(key)) {
+      account.error = 'That doesn\u2019t look like an access key. It starts with lmp_ and is 44 characters long.';
+      render(); return Promise.resolve();
+    }
+    account.key = key; account.checking = true; account.error = '';
+    render();
+    return api('session', {}).then(function (r) {
+      account.checking = false;
+      if (r.ok) {
+        account.verified = true; account.tier = r.tier || ''; account.status = r.status || ''; account.resetsOn = r.resetsOn || '';
+        account.balance = r.balance; account.error = ''; account.draft = '';
+        storeKey(key); pendingFocus = '.lmg-panel-title';
+      } else {
+        account.key = ''; account.verified = false;
+        if (r.code === 'invalid_key') { storeKey(''); account.error = r.message || 'That access key isn\u2019t valid.'; }
+        else account.error = errorText(r, 'check your key');
+      }
+      render();
+    });
+  }
+  function signOut(message) {
+    stopWriting(); cancelOutline();
+    storeKey('');
+    account = { key: '', verified: false, checking: false, error: message || '', draft: '', balance: null, tier: '', status: '', resetsOn: '' };
+    render();
+  }
+  function paintBalance() {
+    var c = root.querySelector('[data-role="balance"]');
+    var b = account.balance;
+    if (!c || !b) return;
+    c.textContent = creditsText(b.total);
+    c.className = 'lmg-chip' + (b.total < 10 ? ' is-low' : '');
+    c.title = 'Plan credits: ' + fmtNum(b.plan) + ', pack credits: ' + fmtNum(b.pack);
+  }
+  function fmtDate(iso) {
+    try { return new Date(iso + 'T00:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'long', timeZone: 'UTC' }); } catch (e) { return iso; }
+  }
+  function accountBar() {
+    var b = account.balance;
+    return h('div', { class: 'lmg-account' }, [
+      b ? h('span', { class: 'lmg-chip' + (b.total < 10 ? ' is-low' : ''), 'data-role': 'balance', title: 'Plan credits: ' + fmtNum(b.plan) + ', pack credits: ' + fmtNum(b.pack), text: creditsText(b.total) }) : null,
+      account.resetsOn ? h('span', { class: 'lmg-account-note', text: 'Monthly credits renew on ' + fmtDate(account.resetsOn) }) : null,
+      h('span', { class: 'lmg-actions-spacer' }),
+      button('Sign out', { kind: 'quiet', small: true, onClick: function () { signOut(''); } })
+    ]);
+  }
+  function panelKey() {
+    var input = h('input', {
+      type: 'text', class: 'lmg-input', id: 'lmg-accesskey', 'data-field': 'accesskey', placeholder: 'lmp_\u2026', value: account.draft,
+      autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Access key', disabled: account.checking || false
+    });
+    input.addEventListener('input', function () { account.draft = input.value; });
+    input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); signIn(input.value); } });
+    return h('div', { class: 'lmg-panel lmg-gate' }, [
+      h('h3', { class: 'lmg-panel-title', text: 'Enter your access key' }),
+      h('p', { class: 'lmg-panel-intro', text: 'You received it by email when you subscribed or bought credits. It keeps your credits and your work private to you.' }),
+      h('div', { class: 'lmg-panel-body' }, [
+        h('div', { class: 'lmg-field' }, [h('label', { class: 'lmg-label', for: 'lmg-accesskey', text: 'Access key' }), input]),
+        account.error ? notice({ kind: 'error', text: account.error }) : null,
+        h('div', { class: 'lmg-actions' }, [
+          button(account.checking ? 'Checking your key\u2026' : 'Continue', { busy: account.checking, disabled: account.checking, onClick: function () { signIn(input.value); } })
+        ]),
+        h('p', { class: 'lmg-help' }, ['Don\u2019t have a key yet? ', plansLink(), '.']),
+        h('p', { class: 'lmg-help', text: 'Lost your key? Look for the email with the subject line about your access, or contact support.' })
+      ])
+    ]);
   }
 
   // ------------------------------------------------------------------ actions
@@ -274,20 +368,13 @@
     render();
     var i = state.input;
     var signal = outlineAbort.signal;
-    state.checking = !!config.sitekey;
-    if (state.checking) render();
-    getHumanToken().then(function (token) {
-      if (state.checking) { state.checking = false; render(); }
-      if (signal.aborted) return { ok: false, code: 'aborted' };
-      return api('outline', {
-        format: state.format, topic: i.topic.trim(), audience: i.audience.trim(), offer: i.offer.trim(),
-        tone: i.tone, length: i.length, language: languageValue(), turnstile: token || undefined
-      }, signal);
-    }, function (e) { state.checking = false; return { ok: false, code: 'human', message: humanError(e) }; }).then(function (r) {
+    api('outline', {
+      format: state.format, topic: i.topic.trim(), audience: i.audience.trim(), offer: i.offer.trim(),
+      tone: i.tone, length: i.length, language: languageValue()
+    }, signal).then(function (r) {
       outlineAbort = null; state.busy = null;
       if (r.code === 'aborted') { render(); return; }
-      if (!r.ok) { state.notice = { kind: 'error', text: errorText(r, 'create your outline') }; render(); return; }
-      if (r.pass) state.pass = r.pass;
+      if (!r.ok) { state.notice = failNotice(r, 'create your outline'); render(); return; }
       var doc = r.document;
       doc.sections.forEach(function (s) { s.status = 'outlined'; s.blocks = []; s.dirty = false; if (!s.keyPoints.length) s.keyPoints = ['']; });
       state.doc = doc;
@@ -335,46 +422,64 @@
     if (!targets.length) { save(); render(); return; }
     targets.forEach(function (s) { s.status = 'queued'; s.error = null; });
     var order = targets.map(function (s) { return s.id; });
-    run = { controller: new AbortController(), queue: order.slice(), order: order, results: {}, revealed: {}, done: false, timer: null };
+    run = { controller: new AbortController(), queue: order.slice(), order: order, results: {}, revealed: {}, done: false, timer: null, ticket: '' };
     state.busy = 'writing';
     save(); render();
     var payload = outlinePayload();
     var current = run;
-    function worker() {
-      if (current !== run || !current.queue.length) return Promise.resolve();
-      var id = current.queue.shift();
-      var sec = findSection(id);
-      if (!sec) { current.revealed[id] = true; return worker(); }
-      sec.status = 'writing';
-      function attempt(renewed) {
-        var usedPass = state.pass || '';
-        return api('section', { document: payload, sectionId: id, pass: usedPass || undefined }, current.controller.signal).then(function (r) {
-          if (current !== run || r.code === 'aborted') return null;
-          if (r.pass) { state.pass = r.pass; save(); }
-          if (r.code === 'verify_required' && !renewed) {
-            // Another writer already renewed the pass while this request was in flight: just retry.
-            if (state.pass && state.pass !== usedPass && !passRenewal) return attempt(true);
-            return renewPass().then(function () { return attempt(true); }, function (e) {
-              return { ok: false, code: 'human', message: humanError(e) };
-            });
-          }
-          return r;
+    // 1. Pay for the sections (one charge, all at once). 2. Write them with the ticket we get back.
+    var startBody = { document: payload };
+    if (order.length < doc.sections.length) startBody.only = order;
+    api('start', startBody, current.controller.signal).then(function (r) {
+      if (current !== run || r.code === 'aborted') return;
+      if (!r.ok) { startFailed(current, r); return; }
+      current.ticket = r.ticket;
+      launch();
+    });
+    function launch() {
+      function worker() {
+        if (current !== run || !current.queue.length) return Promise.resolve();
+        var id = current.queue.shift();
+        var sec = findSection(id);
+        if (!sec) { current.revealed[id] = true; return worker(); }
+        sec.status = 'writing';
+        // The first failure is retried once by itself (the server allows two tries per paid section);
+        // the second failure returns the credit.
+        function attempt(tries) {
+          return api('section', { document: payload, sectionId: id, ticket: current.ticket }, current.controller.signal).then(function (r) {
+            if (current !== run || r.code === 'aborted') return null;
+            var transient = r.code === 'network' || r.code === 'timeout' || r.code === 'bad_response' || (r.code === 'generation_failed' && r.refunded === false);
+            if (!r.ok && transient && tries < 1) return attempt(tries + 1);
+            return r;
+          });
+        }
+        return attempt(0).then(function (r) {
+          if (!r || current !== run) return;
+          current.results[id] = r;
+          reveal(current);
+          return worker();
         });
       }
-      return attempt(false).then(function (r) {
-        if (!r || current !== run) return;
-        current.results[id] = r;
+      var workers = [];
+      for (var i = 0; i < Math.min(config.concurrency, targets.length); i++) workers.push(worker());
+      Promise.all(workers).then(function () {
+        if (current !== run) return;
+        current.done = true;
         reveal(current);
-        return worker();
       });
     }
-    var workers = [];
-    for (var i = 0; i < Math.min(config.concurrency, targets.length); i++) workers.push(worker());
-    Promise.all(workers).then(function () {
-      if (current !== run) return;
-      current.done = true;
-      reveal(current);
+  }
+  // Paying failed (not enough credits, key problem...): nothing was written, nothing was charged.
+  function startFailed(cur, r) {
+    cur.order.forEach(function (id) {
+      var s = findSection(id);
+      if (s && (s.status === 'queued' || s.status === 'writing')) s.status = s.blocks && s.blocks.length ? 'written' : 'outlined';
     });
+    run = null; state.busy = null;
+    state.notice = failNotice(r, 'start writing');
+    if (!state.doc.sections.some(function (s) { return s.blocks && s.blocks.length; })) state.step = 3;
+    pendingFocus = '.lmg-panel-title';
+    save(); render();
   }
   function findSection(id) { return state.doc.sections.filter(function (s) { return s.id === id; })[0]; }
   function nextUnrevealed(cur) { return cur.order.filter(function (id) { return !cur.revealed[id]; })[0]; }
@@ -543,12 +648,20 @@
     root.classList.add('lmg');
     root.setAttribute('data-step', state.step);
 
+    if (!account.verified) {
+      root.appendChild(panelKey());
+      var gateInput = root.querySelector('#lmg-accesskey');
+      if (gateInput && !account.checking && (pendingFocus || keepField)) { try { gateInput.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+      pendingFocus = null;
+      return;
+    }
     if (!config.embedded) {
       root.appendChild(h('header', { class: 'lmg-head' }, [
         h('h2', { class: 'lmg-title', text: 'Create a lead magnet in minutes' }),
         h('p', { class: 'lmg-lede', text: 'Pick a format, describe your audience, and get a ready-to-edit ebook, guide or checklist written for you.' })
       ]));
     }
+    root.appendChild(accountBar());
     root.appendChild(renderStepper());
 
     var wide = state.step === 5 && !!state.doc;
@@ -680,8 +793,8 @@
       notice(state.notice),
       h('div', { class: 'lmg-actions' }, [
         hasWritten && !busy
-          ? confirmButton('Create a new outline', 'Click again: this replaces your written content', createOutline)
-          : button(busy ? (state.checking ? 'Checking you\u2019re human\u2026' : 'Creating your outline\u2026') : (hasOutline ? 'Create a new outline' : 'Create outline'), { busy: busy, disabled: busy, onClick: createOutline }),
+          ? confirmButton('Create a new outline \u00B7 ' + creditsText(COSTS.outline), 'Click again: this replaces your written content', createOutline)
+          : button(busy ? 'Creating your outline\u2026' : (hasOutline ? 'Create a new outline' : 'Create outline') + ' \u00B7 ' + creditsText(COSTS.outline), { busy: busy, disabled: busy, onClick: createOutline }),
         busy ? button('Cancel', { kind: 'quiet', onClick: cancelOutline }) : null,
         !busy && hasOutline ? button('Keep my current outline', { kind: 'ghost', onClick: function () { goTo(3); } }) : null,
         h('span', { class: 'lmg-actions-spacer' }),
@@ -794,6 +907,7 @@
       field({ key: 'cta-b', label: 'Button label', limit: LIMITS.ctaButton[1], get: function () { return c.buttonLabel; }, set: function (v) { c.buttonLabel = v; } })
     ]);
     var hasWritten = writtenCount() > 0;
+    var toWrite = d.sections.filter(function (s) { return s.status !== 'written' || s.dirty; }).length;
     return panel('Review your outline', 'Edit anything you like. Each ' + r.unit + ' is written from its heading and points, so make them say what you want.', [
       h('div', { class: 'lmg-meta-card' }, [
         field({ key: 'title', label: 'Title', limit: LIMITS.title[1], inputClass: 'lmg-input--title', autogrow: true,
@@ -805,7 +919,7 @@
       ctaCard,
       notice(state.notice),
       h('div', { class: 'lmg-actions' }, [
-        button(hasWritten ? 'Continue' : r.writeLabel, { onClick: writeAll }),
+        button((hasWritten ? 'Continue' : r.writeLabel) + (toWrite ? ' \u00B7 ' + creditsText(toWrite * COSTS.section) : ''), { onClick: writeAll }),
         button('Change topic or audience', { kind: 'ghost', onClick: function () { goTo(2); } }),
         h('span', { class: 'lmg-actions-spacer' })
       ])
@@ -831,8 +945,8 @@
         : st === 'error' ? s.error
         : 'Not written yet';
       var action = null;
-      if (!busy && st === 'written') action = button('Rewrite', { kind: 'quiet', small: true, onClick: function () { startWriting([s.id]); } });
-      if (!busy && (st === 'error' || st === 'outlined')) action = button(st === 'error' ? 'Try again' : 'Write', { kind: 'ghost', small: true, onClick: function () { startWriting([s.id]); } });
+      if (!busy && st === 'written') action = button('Rewrite \u00B7 ' + creditsText(COSTS.section), { kind: 'quiet', small: true, onClick: function () { startWriting([s.id]); } });
+      if (!busy && (st === 'error' || st === 'outlined')) action = button((st === 'error' ? 'Try again' : 'Write') + ' \u00B7 ' + creditsText(COSTS.section), { kind: 'ghost', small: true, onClick: function () { startWriting([s.id]); } });
       jobs.appendChild(h('li', { class: 'lmg-job is-' + st }, [
         h('span', { class: 'lmg-job-icon' }, st === 'writing' ? h('span', { class: 'lmg-spinner', 'aria-hidden': 'true' }) : h('span', { icon: icon, style: 'display:inline-flex' })),
         h('div', { class: 'lmg-job-text' }, [
@@ -852,7 +966,7 @@
     var actions = [];
     if (busy) actions.push(button('Stop writing', { kind: 'ghost', onClick: stopWriting }));
     else if (allWritten()) actions.push(button('Continue to design', { onClick: function () { goTo(5); } }));
-    else if (failed.length || pending.length) actions.push(button(failed.length && !pending.length ? 'Try again' : 'Write the rest', { onClick: function () { startWriting(null); } }));
+    else if (failed.length || pending.length) actions.push(button((failed.length && !pending.length ? 'Try again' : 'Write the rest') + ' \u00B7 ' + creditsText((failed.length + pending.length) * COSTS.section), { onClick: function () { startWriting(null); } }));
     actions.push(h('span', { class: 'lmg-actions-spacer' }));
     if (!busy) actions.push(button('Back to outline', { kind: 'quiet', onClick: function () { goTo(3); } }));
 
@@ -1141,30 +1255,25 @@
         }, 900);
       });
     }
-    function attempt(renewed) {
-      var controller = new AbortController();
-      var timer = setTimeout(function () { controller.abort(); }, 150000);
-      return fetch(config.api + '/pdf', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ pass: state.pass || undefined, html: html, filename: filename.replace(/\.pdf$/, '') })
-      }).then(function (res) {
-        clearTimeout(timer);
-        var type = res.headers.get('content-type') || '';
-        if (res.ok && type.indexOf('application/pdf') !== -1) {
-          return res.blob().then(function (blob) { if (blob.size < 500) throw { ok: false, code: 'bad_response' }; return blob; });
-        }
-        return res.json().catch(function () { return { ok: false, code: 'bad_response' }; }).then(function (j) {
-          if (j && j.code === 'verify_required' && !renewed) {
-            return renewPass().then(function () { return attempt(true); }, function (e) { throw { ok: false, code: 'human', message: humanError(e) }; });
-          }
-          throw j || { ok: false, code: 'bad_response' };
-        });
-      }, function () {
-        clearTimeout(timer);
-        throw { ok: false, code: controller.signal.aborted ? 'timeout' : 'network' };
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, 150000);
+    return fetch(config.api + '/pdf', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+      body: JSON.stringify({ key: account.key, html: html, filename: filename.replace(/\.pdf$/, '') })
+    }).then(function (res) {
+      clearTimeout(timer);
+      var type = res.headers.get('content-type') || '';
+      if (res.ok && type.indexOf('application/pdf') !== -1) {
+        return res.blob().then(function (blob) { if (blob.size < 500) throw { ok: false, code: 'bad_response' }; return blob; });
+      }
+      return res.json().catch(function () { return { ok: false, code: 'bad_response' }; }).then(function (j) {
+        absorb(j);
+        throw j || { ok: false, code: 'bad_response' };
       });
-    }
-    return attempt(false);
+    }, function () {
+      clearTimeout(timer);
+      throw { ok: false, code: controller.signal.aborted ? 'timeout' : 'network' };
+    });
   }
   function saveBlob(blob, filename) {
     var url = URL.createObjectURL(blob);
@@ -1208,7 +1317,7 @@
       clearTimeout(slow);
       setBtnBusy(btn, false);
       if (hint) hint.textContent = DL_HINT;
-      var own = err && ['rate_limited', 'daily_limit', 'human', 'verify_failed', 'invalid_input'].indexOf(err.code) !== -1 && err.message;
+      var own = err && ['rate_limited', 'daily_limit', 'invalid_key', 'invalid_input'].indexOf(err.code) !== -1 && err.message;
       state.notice = {
         kind: 'error',
         text: (own || 'We couldn\u2019t create the download right now.') + ' You can still save it with your browser\u2019s print window.',
@@ -1316,84 +1425,6 @@
       info.appendChild(h('p', { class: 'lmg-live-stats', text: f ? 'Your outline will appear here.' : 'Pick a format to begin.' }));
     }
     aside.appendChild(h('div', { class: 'lmg-live' + (state.busy === 'outline' ? ' is-thinking' : '') }, [stage, info]));
-  }
-
-  // ------------------------------------------------------------------ human check (Cloudflare Turnstile) + writing pass
-  // Off until data-turnstile-sitekey is set on the root element. The check is usually invisible;
-  // a small panel only appears if Cloudflare needs a click.
-  var tsLoad = null;
-  function loadTurnstile() {
-    if (window.turnstile) return Promise.resolve();
-    if (tsLoad) return tsLoad;
-    tsLoad = new Promise(function (resolve, reject) {
-      var s = document.createElement('script');
-      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-      s.async = true;
-      s.onload = function () { var n = 0; (function wait() { if (window.turnstile) resolve(); else if (n++ > 100) reject(new Error('ts_load')); else setTimeout(wait, 50); })(); };
-      s.onerror = function () { tsLoad = null; reject(new Error('ts_load')); };
-      document.head.appendChild(s);
-    });
-    return tsLoad;
-  }
-  function getHumanToken() {
-    if (!config.sitekey) return Promise.resolve('');
-    return loadTurnstile().then(function () {
-      return new Promise(function (resolve, reject) {
-        var hd = hIn(document);
-        var hostEl = hd('div', { class: 'lmg-ts-host' });
-        var cancel = hd('button', { type: 'button', class: 'lmg-ts-cancel', text: 'Cancel' });
-        var panel = hd('div', { class: 'lmg-ts', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Quick security check' },
-          hd('div', { class: 'lmg-ts-card' }, [
-            hd('p', { class: 'lmg-ts-title', text: 'Quick security check' }),
-            hd('p', { class: 'lmg-ts-text', text: 'This keeps the free generator safe from bots.' }),
-            hostEl, cancel
-          ]));
-        document.body.appendChild(panel);
-        var widget = null, done = false;
-        // The panel only appears when Cloudflare asks for a click (most visitors never see it).
-        // Fallback after 12 s so a stuck check can always be cancelled.
-        var showTimer = setTimeout(function () { panel.classList.add('is-visible'); }, 12000);
-        function show() { clearTimeout(showTimer); panel.classList.add('is-visible'); var c = panel.querySelector('iframe') || cancel; try { c.focus(); } catch (e) { /* ignore */ } }
-        function finish(fn, value) {
-          if (done) return; done = true;
-          clearTimeout(showTimer);
-          try { if (widget !== null) window.turnstile.remove(widget); } catch (e) { /* ignore */ }
-          panel.remove(); fn(value);
-        }
-        cancel.addEventListener('click', function () { finish(reject, new Error('cancelled')); });
-        try {
-          widget = window.turnstile.render(hostEl, {
-            sitekey: config.sitekey, action: 'lead_magnet', appearance: 'interaction-only',
-            theme: 'light', retry: 'never',
-            callback: function (token) { finish(resolve, token); },
-            'error-callback': function () { finish(reject, new Error('ts_failed')); },
-            'timeout-callback': function () { finish(reject, new Error('ts_timeout')); },
-            'expired-callback': function () { /* a new token is issued automatically */ },
-            'before-interactive-callback': show
-          });
-        } catch (e) { finish(reject, e); }
-      });
-    });
-  }
-  function humanError(e) {
-    var m = e && e.message;
-    if (m === 'cancelled') return 'The security check was cancelled. Click the button again when you are ready.';
-    if (m === 'ts_failed') return 'The security check didn\u2019t go through. Please try again.';
-    if (m === 'ts_timeout') return 'The security check timed out. Please try again.';
-    return 'The security check could not load. Check your connection, or turn off a blocker for this page, then try again.';
-  }
-  // One shared renewal for all parallel writers.
-  var passRenewal = null;
-  function renewPass() {
-    if (passRenewal) return passRenewal;
-    passRenewal = getHumanToken().then(function (token) {
-      return api('pass', { turnstile: token });
-    }).then(function (r) {
-      passRenewal = null;
-      if (r.ok && r.pass) { state.pass = r.pass; save(); return true; }
-      throw new Error(r.message || 'pass');
-    }, function (e) { passRenewal = null; throw e; });
-    return passRenewal;
   }
 
   // ------------------------------------------------------------------ design: templates, palettes, fonts
@@ -1901,15 +1932,45 @@
   }
 
   // ------------------------------------------------------------------ mock API (data-mock="1")
+  // Demo key: lmp_demo. Starts with 150 plan credits + 20 pack credits. A topic containing "fail" makes the
+  // outline fail (credits returned); a section heading containing [fail] fails twice (second one refunds).
+  var mockCredits = parseInt(root.getAttribute('data-mock-credits'), 10);   // optional: start the demo with only this many credits
+  var mockAcct = { plan: mockCredits >= 0 ? mockCredits : 150, pack: mockCredits >= 0 ? 0 : 20, tickets: {}, tries: {} };
+  function mockBal() { return { plan: mockAcct.plan, pack: mockAcct.pack, total: mockAcct.plan + mockAcct.pack }; }
+  function mockSpend(n) { var p = Math.min(mockAcct.plan, n); mockAcct.plan -= p; mockAcct.pack -= (n - p); }
   function mockApi(path, body, signal) {
     return new Promise(function (resolve) {
       var t = setTimeout(function () {
-        if (path === 'pass') { resolve(config.sitekey && !body.turnstile ? { ok: false, code: 'verify_required', message: 'Please confirm you are human, then try again.' } : { ok: true, pass: 'mock.' + Date.now() }); return; }
-        if (path === 'outline' && config.sitekey && !body.turnstile) { resolve({ ok: false, code: 'verify_required', message: 'Please confirm you are human, then try again.' }); return; }
-        var r = path === 'outline' ? mockOutline(body) : mockSection(body);
-        if (r.ok && path === 'outline') r.pass = 'mock.' + Date.now();
-        resolve(r);
-      }, path === 'outline' ? 1400 : path === 'pass' ? 300 : 700 + Math.random() * 1600);
+        if (body.key !== 'lmp_demo') { resolve({ ok: false, code: 'invalid_key', message: 'That access key isn\u2019t valid. Check the email we sent you, or ask for a new key.' }); return; }
+        if (path === 'session') { resolve({ ok: true, tier: 'Pro', status: 'active', balance: mockBal(), resetsOn: '2026-12-05', daily: { used: 0, limit: 100 } }); return; }
+        if (path === 'outline') {
+          if (mockBal().total < COSTS.outline) { resolve({ ok: false, code: 'insufficient_credits', message: 'You need 2 credits for this and have ' + mockBal().total + '.', needed: 2, balance: mockBal() }); return; }
+          var o = mockOutline(body);
+          if (!o.ok) { o.message += ' Your credits were returned.'; o.refunded = true; o.balance = mockBal(); resolve(o); return; }
+          mockSpend(COSTS.outline); o.charged = COSTS.outline; o.balance = mockBal(); resolve(o); return;
+        }
+        if (path === 'start') {
+          var all = (body.document && body.document.sections || []).map(function (x) { return x.id; });
+          var ids = Array.isArray(body.only) ? body.only : all;
+          if (mockBal().total < ids.length) { resolve({ ok: false, code: 'insufficient_credits', message: 'You need ' + ids.length + ' credits for this and have ' + mockBal().total + '.', needed: ids.length, balance: mockBal() }); return; }
+          mockSpend(ids.length);
+          var tk = 'mock-ticket-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+          mockAcct.tickets[tk] = ids;
+          resolve({ ok: true, ticket: tk, sectionIds: ids, expiresAt: new Date(Date.now() + 86400000).toISOString(), charged: ids.length, balance: mockBal() }); return;
+        }
+        if (path === 'section') {
+          var ok = mockAcct.tickets[body.ticket];
+          if (!ok || ok.indexOf(body.sectionId) === -1) { resolve({ ok: false, code: 'invalid_ticket', message: 'This document is not paid for, or its writing session expired. Please start it again.' }); return; }
+          var r = mockSection(body);
+          if (!r.ok && r.code === 'generation_failed') {
+            var k = body.ticket + body.sectionId; mockAcct.tries[k] = (mockAcct.tries[k] || 0) + 1;
+            if (mockAcct.tries[k] >= 2) { mockAcct.pack += 1; r.message = 'We couldn\u2019t finish this right now. Your credits were returned. Please try again in a minute.'; r.refunded = true; r.balance = mockBal(); }
+            else { r.message = 'We couldn\u2019t finish this right now. Please try again in a minute.'; r.refunded = false; }
+          }
+          resolve(r); return;
+        }
+        resolve({ ok: false, code: 'not_found', message: 'Unknown address.' });
+      }, path === 'outline' ? 1400 : path === 'session' || path === 'start' ? 400 : 700 + Math.random() * 1600);
       if (signal) signal.addEventListener('abort', function () { clearTimeout(t); resolve({ ok: false, code: 'aborted' }); });
     });
   }
@@ -1942,7 +2003,6 @@
     };
   }
   function mockSection(b) {
-    if (config.sitekey && !(typeof b.pass === 'string' && /^mock\.\d+$/.test(b.pass))) return { ok: false, code: 'verify_required', message: 'For your security, please confirm you are human to keep writing.' };
     var sec = b.document.sections.filter(function (s) { return s.id === b.sectionId; })[0];
     if (!sec) return { ok: false, code: 'invalid_input', message: 'sectionId does not match any section in the outline.' };
     if (/\[fail\]/i.test(sec.heading)) return { ok: false, code: 'generation_failed', message: 'We couldn\'t write this section right now. Please try again.' };
@@ -1964,6 +2024,7 @@
     state.notice = { kind: 'info', text: 'Welcome back. Your work was saved in this browser.',
       action: confirmButton('Start over', 'Click again to delete it', startOver, { kind: 'quiet', small: true }) };
   }
-  render();
+  var savedKey = readKey();
+  if (savedKey) signIn(savedKey, true); else render();
   root.lmg = { version: VERSION, state: function () { return state; }, reset: startOver, exportPdf: exportPdf };
 })();
