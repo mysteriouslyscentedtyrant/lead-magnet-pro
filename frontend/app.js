@@ -1392,24 +1392,25 @@
     var numbering = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering ' + NS + '>' + absNum(0, 'bullet', '\u2022') + absNum(1, 'decimal', '%1.') +
       '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
       nums.map(function (_, i) { return '<w:num w:numId="' + (3 + i) + '"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>'; }).join('') + '</w:numbering>';
+    var settings = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ' + NS + '><w:defaultTabStop w:val="720"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>';
     var footerText = (b.authorName || '').trim();
     var footer = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ' + NS + '><w:p><w:pPr><w:pStyle w:val="Footer"/>' + bidi + '<w:jc w:val="' + (arabic ? 'left' : 'right') + '"/></w:pPr>' +
       (footerText ? '<w:r><w:t xml:space="preserve">' + xmlEsc(footerText) + '    </w:t></w:r>' : '') +
       '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>';
     var R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
     var docRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-      '<Relationship Id="rIdS" Type="' + R + '/styles" Target="styles.xml"/><Relationship Id="rIdN" Type="' + R + '/numbering" Target="numbering.xml"/><Relationship Id="rIdF" Type="' + R + '/footer" Target="footer1.xml"/>' +
+      '<Relationship Id="rIdT" Type="' + R + '/settings" Target="settings.xml"/><Relationship Id="rIdS" Type="' + R + '/styles" Target="styles.xml"/><Relationship Id="rIdN" Type="' + R + '/numbering" Target="numbering.xml"/><Relationship Id="rIdF" Type="' + R + '/footer" Target="footer1.xml"/>' +
       links.map(function (u, i) { return '<Relationship Id="rIdL' + (i + 1) + '" Type="' + R + '/hyperlink" Target="' + xmlEsc(u) + '" TargetMode="External"/>'; }).join('') + '</Relationships>';
     var types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
       '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
-      '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' +
+      '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' +
       '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>';
     var rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="' + R + '/officeDocument" Target="word/document.xml"/>' +
       '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>';
     var core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEsc(d.title) + '</dc:title><dc:creator>' + xmlEsc(footerText || 'Lead Magnet') + '</dc:creator></cp:coreProperties>';
     return zipStore([
       { name: '[Content_Types].xml', data: types }, { name: '_rels/.rels', data: rels }, { name: 'docProps/core.xml', data: core },
-      { name: 'word/document.xml', data: document_ }, { name: 'word/styles.xml', data: styles }, { name: 'word/numbering.xml', data: numbering },
+      { name: 'word/document.xml', data: document_ }, { name: 'word/styles.xml', data: styles }, { name: 'word/settings.xml', data: settings }, { name: 'word/numbering.xml', data: numbering },
       { name: 'word/footer1.xml', data: footer }, { name: 'word/_rels/document.xml.rels', data: docRels }
     ]);
   }
