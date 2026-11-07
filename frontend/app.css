@@ -644,3 +644,23 @@
 
 .lmg-linkbtn { background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; }
 .lmg-resend { display: grid; gap: 10px; margin-top: 6px; }
+
+/* ---- library: My documents and brand kits ---- */
+.lmg-save-status { font-size: 13px; color: var(--lmg-soft); }
+.lmg-save-status.is-error { color: #B42318; }
+.lmg-lib-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 10px; }
+.lmg-lib-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 16px; border: 1px solid var(--lmg-line); border-radius: var(--lmg-radius-card); background: #fff; }
+.lmg-lib-item.is-current { border-color: var(--lmg-ink); }
+.lmg-lib-text { display: grid; gap: 4px; min-width: 0; }
+.lmg-lib-title { font-weight: 600; color: var(--lmg-ink); overflow-wrap: anywhere; }
+.lmg-lib-meta { font-size: 13px; color: var(--lmg-soft); }
+.lmg-lib-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+.lmg-lib-empty { color: var(--lmg-soft); }
+.lmg-kits { display: grid; gap: 10px; }
+.lmg-kit-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lmg-kit-row .lmg-input { flex: 1 1 160px; min-width: 0; }
+.lmg-select { appearance: auto; }
+@media (max-width: 640px) {
+  .lmg-lib-item { flex-direction: column; align-items: stretch; }
+  .lmg-lib-actions { justify-content: flex-start; }
+}

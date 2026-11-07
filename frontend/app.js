@@ -14,7 +14,7 @@
 
   var ROOT_ID = 'lead-magnet-generator';
   var STORAGE_KEY = 'lmp:v1';
-  var VERSION = '0.3.0';
+  var VERSION = '0.4.0';
 
   // ------------------------------------------------------------------ constants
   var FORMATS = {
@@ -121,6 +121,7 @@
         var copy = { v: 1, step: state.step, format: state.format, input: state.input, doc: state.doc };
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(copy));
       } catch (e) { /* storage full or blocked: the tool still works, it just won't survive a refresh */ }
+      scheduleLibrarySave();
     }, 250);
   }
   function clearSaved() { try { window.localStorage.removeItem(STORAGE_KEY); } catch (e) { /* ignore */ } }
@@ -277,7 +278,7 @@
   }
   function signOut(message) {
     stopWriting(); cancelOutline();
-    storeKey('');
+    storeKey(''); clearTimeout(libTimer); lib = freshLib();
     account = { key: '', verified: false, checking: false, error: message || '', draft: '', balance: null, tier: '', status: '', resetsOn: '', resend: { open: false, email: '', busy: false, message: '', error: '' } };
     render();
   }
@@ -298,6 +299,8 @@
       b ? h('span', { class: 'lmg-chip' + (b.total < 10 ? ' is-low' : ''), 'data-role': 'balance', title: 'Plan credits: ' + fmtNum(b.plan) + ', pack credits: ' + fmtNum(b.pack), text: creditsText(b.total) }) : null,
       account.resetsOn ? h('span', { class: 'lmg-account-note', text: 'Monthly credits renew on ' + fmtDate(account.resetsOn) }) : null,
       h('span', { class: 'lmg-actions-spacer' }),
+      h('span', { class: 'lmg-save-status' + (lib.statusKind === 'error' ? ' is-error' : ''), 'data-role': 'save-status', role: 'status', text: lib.status }),
+      lib.view ? null : button('My documents', { kind: 'ghost', small: true, disabled: !!state.busy, onClick: openLibrary }),
       button('Sign out', { kind: 'quiet', small: true, onClick: function () { signOut(''); } })
     ]);
   }
@@ -354,12 +357,288 @@
     ]);
   }
 
+  // ------------------------------------------------------------------ library: saved documents and brand kits (free, stored on the server)
+  // The page saves the current document after the outline, after writing, before a download and a little while after edits.
+  // A document is the whole working state (format, details, outline, text, design), so it reopens exactly where it was.
+  var lib = freshLib();
+  var libTimer = null;
+  function freshLib() { return { view: false, items: null, loading: false, error: '', notice: null, armed: '', busy: '', saving: false, again: false, status: '', statusKind: '', last: null, disabled: false, kits: null, kitsError: '', kitName: '', kitBusy: false, kitMsg: '', kitPick: '' }; }
+  function docSnapshot() {
+    var d = JSON.parse(JSON.stringify(state.doc));
+    delete d.libraryId;
+    d.sections.forEach(function (s) { if (s.status === 'writing' || s.status === 'queued') s.status = 'outlined'; s.error = null; });
+    return { v: 1, format: state.format, input: state.input, doc: d };
+  }
+  function docMeta(d) { return { format: d.format, sections: d.sections.length, written: writtenCount() }; }
+  function paintSaveStatus() {
+    var el = root.querySelector('[data-role="save-status"]');
+    if (!el) return;
+    el.textContent = lib.status;
+    el.className = 'lmg-save-status' + (lib.statusKind === 'error' ? ' is-error' : '');
+  }
+  function setSaveStatus(text, kind) { lib.status = text; lib.statusKind = kind || ''; paintSaveStatus(); }
+  // Saves the current document. Resolves true when the server has it.
+  function saveDocToLibrary() {
+    if (!state.doc || !account.verified || lib.disabled) return Promise.resolve(false);
+    if (lib.saving) { lib.again = true; return Promise.resolve(false); }
+    var snap = docSnapshot(), json = JSON.stringify(snap), id = state.doc.libraryId || '';
+    if (id && lib.last && lib.last.id === id && lib.last.json === json) return Promise.resolve(true);
+    lib.saving = true; setSaveStatus('Saving\u2026');
+    var body = { op: 'save', kind: 'doc', title: state.doc.title, meta: docMeta(state.doc), data: snap };
+    if (id) body.id = id;
+    var docRef = state.doc;
+    return api('library', body).then(function (r) {
+      lib.saving = false;
+      var ok = !!(r && r.ok);
+      if (ok) {
+        if (state.doc === docRef) { state.doc.libraryId = r.id; save(); }
+        lib.last = { id: r.id, json: json };
+        if (lib.items) lib.items = null;          // the list is reloaded next time it opens
+        setSaveStatus('Saved to My documents');
+      } else if (r && r.code === 'not_configured') { lib.disabled = true; setSaveStatus(''); }
+      else if (r && r.code === 'library_full') setSaveStatus('Not saved: My documents is full. Delete one to save this.', 'error');
+      else if (r && r.code === 'too_large') setSaveStatus('Not saved: ' + r.message, 'error');
+      else if (r && r.code === 'aborted') setSaveStatus('');
+      else setSaveStatus('Not saved yet. Your work is kept in this browser.', 'error');
+      if (lib.again) { lib.again = false; return saveDocToLibrary(); }
+      return ok;
+    });
+  }
+  // A quiet autosave a little while after edits, once the document has been saved at least once.
+  function scheduleLibrarySave() {
+    clearTimeout(libTimer);
+    if (!state.doc || !state.doc.libraryId || lib.disabled) return;
+    libTimer = setTimeout(function () { if (!run && state.doc) saveDocToLibrary(); }, 20000);
+  }
+  function currentIsSaved() {
+    if (!state.doc) return true;
+    if (!state.doc.libraryId || !lib.last || lib.last.id !== state.doc.libraryId) return false;
+    return lib.last.json === JSON.stringify(docSnapshot());
+  }
+
+  function openLibrary() {
+    if (state.busy) return;
+    lib.view = true; lib.notice = null; lib.armed = ''; pendingFocus = '.lmg-panel-title';
+    render(); loadLibraryList();
+    if (state.doc && !currentIsSaved()) saveDocToLibrary().then(function () { if (lib.view) loadLibraryList(); });
+  }
+  function closeLibrary() { lib.view = false; lib.notice = null; lib.armed = ''; pendingFocus = '.lmg-panel-title'; render(); }
+  function loadLibraryList() {
+    lib.loading = true; lib.error = ''; render();
+    return api('library', { op: 'list', kind: 'doc' }).then(function (r) {
+      lib.loading = false;
+      if (r.ok) { lib.items = r.items; lib.limit = r.limit; }
+      else if (r.code === 'not_configured') { lib.disabled = true; lib.error = r.message; }
+      else lib.error = errorText(r, 'load your documents');
+      if (lib.view) render();
+    });
+  }
+  function cleanLoadedDoc(data) {
+    if (!data || typeof data !== 'object' || !data.doc || typeof data.doc !== 'object' || !Array.isArray(data.doc.sections) || !FORMATS[data.doc.format]) return null;
+    var d = data.doc;
+    d.title = typeof d.title === 'string' ? d.title : '';
+    d.subtitle = typeof d.subtitle === 'string' ? d.subtitle : '';
+    d.sections = d.sections.filter(function (s) { return s && typeof s.id === 'string'; }).map(function (s) {
+      s.heading = typeof s.heading === 'string' ? s.heading : '';
+      s.goal = typeof s.goal === 'string' ? s.goal : '';
+      s.keyPoints = Array.isArray(s.keyPoints) && s.keyPoints.length ? s.keyPoints.map(String) : [''];
+      s.blocks = Array.isArray(s.blocks) ? s.blocks.filter(function (b) { return b && typeof b.type === 'string'; }).map(function (b) {
+        b.text = typeof b.text === 'string' ? b.text : ''; b.items = Array.isArray(b.items) ? b.items.map(String) : []; return b;
+      }) : [];
+      if (s.status === 'writing' || s.status === 'queued' || !s.status) s.status = s.blocks.length ? 'written' : 'outlined';
+      s.error = null; s.dirty = !!s.dirty;
+      return s;
+    });
+    if (!d.sections.length) return null;
+    d.cta = d.cta && typeof d.cta === 'object' ? d.cta : { heading: '', text: '', buttonLabel: '', url: '' };
+    d.branding = safeBranding(d.branding);
+    var input = Object.assign(freshState().input, data.input && typeof data.input === 'object' ? data.input : {});
+    return { doc: d, input: input, format: FORMATS[data.format] ? data.format : d.format };
+  }
+  function openFromLibrary(item) {
+    if (lib.busy) return;
+    if (!currentIsSaved() && lib.armed !== item.id) {
+      // Try to keep the current work first; if that fails, ask for a second click.
+      lib.busy = item.id; render();
+      saveDocToLibrary().then(function (ok) {
+        lib.busy = '';
+        if (ok) { openFromLibrary(item); return; }
+        lib.armed = item.id;
+        lib.notice = { kind: 'error', text: 'Your current lead magnet could not be saved first. Click Open again to replace it anyway (it stays only if you download it).' };
+        render();
+      });
+      return;
+    }
+    lib.busy = item.id; lib.notice = null; render();
+    api('library', { op: 'load', kind: 'doc', id: item.id }).then(function (r) {
+      lib.busy = ''; lib.armed = '';
+      var c = r.ok && r.item ? cleanLoadedDoc(r.item.data) : null;
+      if (!c) { lib.notice = { kind: 'error', text: r.ok ? 'This document could not be opened.' : errorText(r, 'open this document') }; render(); return; }
+      stopWriting(); cancelOutline();
+      state = freshState();
+      state.format = c.format; state.input = c.input; state.doc = c.doc; state.doc.libraryId = item.id;
+      state.step = allWritten() ? 5 : state.doc.sections.some(function (s) { return s.blocks.length; }) ? 4 : 3;
+      lib.last = { id: item.id, json: JSON.stringify(docSnapshot()) };
+      lib.view = false; restored = false; setSaveStatus('Opened from My documents');
+      pendingFocus = '.lmg-panel-title';
+      save(); render();
+    });
+  }
+  function duplicateInLibrary(item) {
+    if (lib.busy) return;
+    lib.busy = item.id; lib.notice = null; render();
+    api('library', { op: 'load', kind: 'doc', id: item.id }).then(function (r) {
+      var c = r.ok && r.item ? cleanLoadedDoc(r.item.data) : null;
+      if (!c) { lib.busy = ''; lib.notice = { kind: 'error', text: errorText(r, 'copy this document') }; render(); return null; }
+      c.doc.title = ('Copy of ' + c.doc.title).slice(0, LIMITS.title[1]);
+      var data = { v: 1, format: c.format, input: c.input, doc: c.doc };
+      return api('library', { op: 'save', kind: 'doc', title: c.doc.title, meta: { format: c.doc.format, sections: c.doc.sections.length, written: c.doc.sections.filter(function (s) { return s.status === 'written'; }).length }, data: data });
+    }).then(function (r) {
+      if (r === null) return;
+      lib.busy = '';
+      if (!r.ok) { lib.notice = { kind: 'error', text: r.code === 'library_full' ? r.message : errorText(r, 'copy this document') }; render(); return; }
+      loadLibraryList();
+    });
+  }
+  function deleteFromLibrary(item) {
+    lib.busy = item.id; lib.notice = null; render();
+    api('library', { op: 'delete', kind: 'doc', id: item.id }).then(function (r) {
+      lib.busy = '';
+      if (!r.ok) { lib.notice = { kind: 'error', text: errorText(r, 'delete this document') }; render(); return; }
+      if (state.doc && state.doc.libraryId === item.id) { delete state.doc.libraryId; lib.last = null; save(); }
+      lib.items = (lib.items || []).filter(function (x) { return x.id !== item.id; });
+      render();
+    });
+  }
+  function fmtSaved(iso) {
+    try { return new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch (e) { return iso; }
+  }
+  function panelLibrary() {
+    var body = [];
+    if (lib.notice) body.push(notice(lib.notice));
+    if (lib.loading && !lib.items) body.push(h('p', { class: 'lmg-help', text: 'Loading your documents\u2026' }));
+    else if (lib.error) body.push(notice({ kind: lib.disabled ? 'info' : 'error', text: lib.error }));
+    else if (lib.items && !lib.items.length) body.push(h('p', { class: 'lmg-lib-empty', text: 'Nothing saved yet. Your lead magnets are saved here automatically once their outline is created.' }));
+    else if (lib.items) {
+      body.push(h('p', { class: 'lmg-help', text: plural(lib.items.length, 'document', 'documents') + ' saved' + (lib.limit ? ' (up to ' + lib.limit + ')' : '') + '. Saving and opening are free.' }));
+      body.push(h('ul', { class: 'lmg-lib-list' }, lib.items.map(function (it) {
+        var m = it.meta || {}, f = FORMATS[m.format];
+        var busy = lib.busy === it.id;
+        var current = state.doc && state.doc.libraryId === it.id;
+        var info = [f ? f.name : 'Document', m.sections ? m.written + ' of ' + plural(m.sections, 'section', 'sections') + ' written' : null, 'saved ' + fmtSaved(it.updatedAt)].filter(Boolean).join(' \u00b7 ');
+        return h('li', { class: 'lmg-lib-item' + (current ? ' is-current' : ''), 'data-id': it.id }, [
+          h('div', { class: 'lmg-lib-text' }, [
+            h('span', { class: 'lmg-lib-title', text: it.title || 'Untitled document' }),
+            h('span', { class: 'lmg-lib-meta', text: (current ? 'Open now \u00b7 ' : '') + info })
+          ]),
+          h('div', { class: 'lmg-lib-actions' }, [
+            button(busy ? 'Working\u2026' : (lib.armed === it.id ? 'Open anyway' : 'Open'), { small: true, disabled: !!lib.busy, onClick: function () { if (current && currentIsSaved()) { closeLibrary(); return; } openFromLibrary(it); } }),
+            button('Duplicate', { kind: 'ghost', small: true, disabled: !!lib.busy, onClick: function () { duplicateInLibrary(it); } }),
+            confirmButton('Delete', 'Click again to delete', function () { deleteFromLibrary(it); }, { kind: 'quiet', small: true, disabled: !!lib.busy })
+          ])
+        ]);
+      })));
+    }
+    body.push(h('div', { class: 'lmg-actions' }, [
+      button(state.doc ? 'Back to my lead magnet' : 'Back', { kind: 'ghost', onClick: closeLibrary }),
+      h('span', { class: 'lmg-actions-spacer' }),
+      state.doc ? confirmButton('Start a new lead magnet', 'Click again: the current one stays in My documents', function () { lib.view = false; startOver(); }, { kind: 'quiet' }) : null
+    ]));
+    return h('div', { class: 'lmg-panel lmg-library' }, [
+      h('h3', { class: 'lmg-panel-title', text: 'My documents' }),
+      h('p', { class: 'lmg-panel-intro', text: 'Everything you created with your key, newest first. Open one to keep editing, write missing sections or download it again.' }),
+      h('div', { class: 'lmg-panel-body' }, body)
+    ]);
+  }
+
+  // ---- brand kits (Design step)
+  function loadKits(host) {
+    lib.kits = 'loading'; lib.kitsError = '';
+    api('library', { op: 'list', kind: 'kit' }).then(function (r) {
+      if (r.ok) { lib.kits = r.items; lib.kitLimit = r.limit; }
+      else { lib.kits = []; lib.kitsError = r.code === 'not_configured' ? '' : errorText(r, 'load your brand kits'); if (r.code === 'not_configured') lib.disabled = true; }
+      host.redraw();
+    });
+  }
+  function kitControl(d, onApplied) {
+    var host = h('div', { class: 'lmg-kits' });
+    host.redraw = function () { host.textContent = ''; kitBody().forEach(function (n) { if (n) host.appendChild(n); }); };
+    function kitBody() {
+      if (lib.disabled) return [h('p', { class: 'lmg-help', text: 'Brand kits are not available yet.' })];
+      if (lib.kits === null) { loadKits(host); return [h('p', { class: 'lmg-help', text: 'Loading your brand kits\u2026' })]; }
+      if (lib.kits === 'loading') return [h('p', { class: 'lmg-help', text: 'Loading your brand kits\u2026' })];
+      var out = [];
+      if (lib.kitsError) out.push(h('p', { class: 'lmg-field-error', text: lib.kitsError }));
+      if (lib.kits.length) {
+        if (!lib.kitPick || !lib.kits.some(function (k) { return k.id === lib.kitPick; })) lib.kitPick = lib.kits[0].id;
+        var sel = h('select', { class: 'lmg-input lmg-select', 'aria-label': 'Your brand kits', 'data-field': 'kit-pick', disabled: lib.kitBusy,
+          onchange: function (ev) { lib.kitPick = ev.target.value; host.redraw(); } },
+          lib.kits.map(function (k) { var o = h('option', { value: k.id, text: k.title }); if (k.id === lib.kitPick) o.selected = true; return o; }));
+        var pick = lib.kits.filter(function (k) { return k.id === lib.kitPick; })[0];
+        var m = (pick && pick.meta) || {};
+        out.push(h('div', { class: 'lmg-kit-row' }, [
+          HEX.test(m.primary || '') ? h('span', { class: 'lmg-swatch-dot', 'aria-hidden': 'true', style: 'background:' + m.primary }) : null,
+          HEX.test(m.accent || '') ? h('span', { class: 'lmg-swatch-dot lmg-swatch-dot--a', 'aria-hidden': 'true', style: 'background:' + m.accent }) : null,
+          sel
+        ]));
+        out.push(h('div', { class: 'lmg-kit-row' }, [
+          button(lib.kitBusy === 'apply' ? 'Applying\u2026' : 'Apply this kit', { small: true, disabled: !!lib.kitBusy, onClick: function () { applyKit(pick); } }),
+          confirmButton('Delete', 'Click again to delete', function () { deleteKit(pick); }, { kind: 'quiet', small: true, disabled: !!lib.kitBusy })
+        ]));
+      } else out.push(h('p', { class: 'lmg-help', text: 'No brand kit yet. Save your colors, fonts, logo and name below to reuse them on your next lead magnet.' }));
+      var name = h('input', { type: 'text', class: 'lmg-input', 'data-field': 'kit-name', maxlength: '60', placeholder: 'Name this kit', value: lib.kitName,
+        'aria-label': 'Brand kit name', oninput: function (ev) { lib.kitName = ev.target.value; } });
+      out.push(h('div', { class: 'lmg-kit-row' }, [name,
+        button(lib.kitBusy === 'save' ? 'Saving\u2026' : 'Save as brand kit', { kind: 'ghost', small: true, disabled: !!lib.kitBusy, onClick: function () { saveKit(); } })]));
+      if (lib.kitMsg) out.push(h('p', { class: 'lmg-help', role: 'status', text: lib.kitMsg }));
+      return out;
+    }
+    function saveKit() {
+      var b = safeBranding(d.branding);
+      var title = (lib.kitName || b.authorName || 'My brand kit').trim().slice(0, 60) || 'My brand kit';
+      var same = (lib.kits || []).filter(function (k) { return k.title.toLowerCase() === title.toLowerCase(); })[0];
+      lib.kitBusy = 'save'; lib.kitMsg = ''; host.redraw();
+      var body = { op: 'save', kind: 'kit', title: title, meta: { primary: b.colors.primary, accent: b.colors.accent, template: b.templateId, fonts: b.fonts.heading, logo: !!b.logoDataUrl }, data: b };
+      if (same) body.id = same.id;   // same name: replace that kit
+      api('library', body).then(function (r) {
+        lib.kitBusy = '';
+        if (r.ok) { lib.kitMsg = (same ? 'Updated' : 'Saved') + ' \u201c' + title + '\u201d.'; lib.kitName = ''; lib.kitPick = r.id; lib.kits = null; }
+        else lib.kitMsg = r.code === 'library_full' || r.code === 'too_large' ? r.message : errorText(r, 'save this brand kit');
+        host.redraw();
+      });
+    }
+    function applyKit(k) {
+      if (!k) return;
+      lib.kitBusy = 'apply'; lib.kitMsg = ''; host.redraw();
+      api('library', { op: 'load', kind: 'kit', id: k.id }).then(function (r) {
+        lib.kitBusy = '';
+        if (!r.ok || !r.item || !r.item.data) { lib.kitMsg = errorText(r, 'apply this brand kit'); host.redraw(); return; }
+        d.branding = safeBranding(r.item.data);
+        lib.kitMsg = 'Applied \u201c' + k.title + '\u201d.';
+        save(); onApplied();
+      });
+    }
+    function deleteKit(k) {
+      if (!k) return;
+      lib.kitBusy = 'delete'; host.redraw();
+      api('library', { op: 'delete', kind: 'kit', id: k.id }).then(function (r) {
+        lib.kitBusy = '';
+        if (r.ok) { lib.kits = (lib.kits || []).filter(function (x) { return x.id !== k.id; }); lib.kitMsg = 'Deleted \u201c' + k.title + '\u201d.'; }
+        else lib.kitMsg = errorText(r, 'delete this brand kit');
+        host.redraw();
+      });
+    }
+    host.redraw();
+    return host;
+  }
+
   // ------------------------------------------------------------------ actions
   function goTo(step) {
     if (step < 1 || step > maxStep()) return;
     state.step = step; state.notice = null; state.errors = {};
     pendingFocus = '.lmg-panel-title';
     save(); render();
+    if (step === 5) saveDocToLibrary();
   }
   // After a step change the new panel can be much shorter than the old one (a long outline, then the
   // writing view), which would leave the visitor near the page footer. Bring the tool's top back into view.
@@ -411,6 +690,7 @@
       state.doc = doc;
       state.step = 3; pendingFocus = '.lmg-panel-title';
       save(); render();
+      saveDocToLibrary();
     });
   }
   function cancelOutline() { if (outlineAbort) outlineAbort.abort(); }
@@ -522,7 +802,7 @@
     if (cur !== run || cur.timer) return;
     var id = nextUnrevealed(cur);
     if (!id) {
-      if (cur.done) { run = null; state.busy = null; save(); render(); }
+      if (cur.done) { run = null; state.busy = null; save(); render(); saveDocToLibrary(); }
       return;
     }
     var r = cur.results[id];
@@ -550,6 +830,7 @@
   function startOver() {
     stopWriting(); cancelOutline(); clearSaved();
     state = freshState(); restored = false; pendingFocus = '.lmg-panel-title';
+    lib.last = null; lib.status = ''; clearTimeout(libTimer);
     render();
   }
 
@@ -693,6 +974,15 @@
       ]));
     }
     root.appendChild(accountBar());
+    if (lib.view) {
+      previewFrame = null; els.aside = null;
+      root.appendChild(panelLibrary());
+      var libTarget = pendingFocus ? root.querySelector(pendingFocus) : null;
+      if (pendingFocus === '.lmg-panel-title') scrollToTool();
+      if (libTarget) { libTarget.setAttribute('tabindex', '-1'); try { libTarget.focus({ preventScroll: true }); } catch (e) { libTarget.focus(); } }
+      pendingFocus = null;
+      return;
+    }
     root.appendChild(renderStepper());
 
     var wide = state.step === 5 && !!state.doc;
@@ -1226,6 +1516,7 @@
     var sizeGroup = radioGroup('Page size', [['A4', 'A4'], ['Letter', 'US Letter']], b.pageSize, function (v) { b.pageSize = v; save(); render(); });
 
     var controls = h('div', { class: 'lmg-design-controls' }, [
+      ctrl('Brand kit', 'Reuse your colors, fonts, logo and name on every lead magnet.', [kitControl(d, function () { render(); })]),
       ctrl('Template', null, [tplGroup]),
       ctrl('Colors', null, [swatches, h('div', { class: 'lmg-color-row' }, [cp.el, ca.el])]),
       ctrl('Fonts', null, [fontGroup]),
@@ -1327,7 +1618,7 @@
       return { intro: L.intro, conclusion: L.conclusion, problem: L.problem, mistakes: L.mistakes, next_step: L.next_step, chapter: L.chapter + ' ' + n, step: L.step + ' ' + n, group: '' }[sec.type] || '';
     }
     function listPara(kind, text, numId) {
-      var pre = kind === 'checklist' ? '☐  ' : '';
+      var pre = kind === 'checklist' ? '\u2610  ' : '';
       return para('ListParagraph', run(pre + text), kind === 'checklist' ? '' : '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="' + numId + '"/></w:numPr>');
     }
     d.sections.forEach(function (s) {
@@ -1360,7 +1651,7 @@
       if (c.buttonLabel) {
         if (c.url && /^https?:\/\//i.test(c.url)) {
           links.push(c.url);
-          body.push(para('Normal', '<w:hyperlink r:id="rIdL' + links.length + '"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/><w:b/></w:rPr><w:t xml:space="preserve">' + xmlEsc(c.buttonLabel) + ' →</w:t></w:r></w:hyperlink>'));
+          body.push(para('Normal', '<w:hyperlink r:id="rIdL' + links.length + '"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/><w:b/></w:rPr><w:t xml:space="preserve">' + xmlEsc(c.buttonLabel) + ' \u2192</w:t></w:r></w:hyperlink>'));
         } else body.push(textPara('Normal', c.buttonLabel, { bold: true, color: P }));
       }
     }
@@ -1422,6 +1713,7 @@
       pendingFocus = '[data-field="cta-url"]';
       render(); return;
     }
+    saveDocToLibrary();
     var hint = btn.parentNode && btn.parentNode.querySelector('.lmg-dl-hint');
     try {
       var b = safeBranding(d.branding);
@@ -1430,7 +1722,7 @@
       saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), filename);
       if (hint) hint.textContent = 'Downloaded: ' + filename + '. Open it in Word, Google Docs or Pages and keep editing.';
     } catch (e) {
-      if (hint) hint.textContent = 'We couldn’t create the Word file. Please try again, or use the PDF.';
+      if (hint) hint.textContent = 'We couldn\u2019t create the Word file. Please try again, or use the PDF.';
     }
   }
 
@@ -1500,6 +1792,7 @@
       pendingFocus = '[data-field="cta-url"]';
       render(); return;
     }
+    saveDocToLibrary();
     setBtnBusy(btn, true, 'Preparing your PDF\u2026');
     if (!config.pdfServer) {
       exportPdf().then(function () { setBtnBusy(btn, false); });
@@ -2138,6 +2431,24 @@
   // outline fail (credits returned); a section heading containing [fail] fails twice (second one refunds).
   var mockCredits = parseInt(root.getAttribute('data-mock-credits'), 10);   // optional: start the demo with only this many credits
   var mockAcct = { plan: mockCredits >= 0 ? mockCredits : 150, pack: mockCredits >= 0 ? 0 : 20, tickets: {}, tries: {} };
+  var mockLib = { doc: {}, kit: {} };
+  function mockLibrary(body) {
+    var kind = body.kind, store = mockLib[kind], max = kind === 'doc' ? 25 : 10, now = new Date().toISOString();
+    if (!store) return { ok: false, code: 'invalid_input', message: 'Unknown library request.' };
+    var list = Object.keys(store).map(function (id) { var x = store[id]; return { id: id, title: x.title, meta: x.meta, size: x.size, createdAt: x.createdAt, updatedAt: x.updatedAt }; });
+    if (body.op === 'list') return { ok: true, kind: kind, limit: max, items: list.sort(function (a, b) { return a.updatedAt < b.updatedAt ? 1 : -1; }) };
+    var it = store[body.id];
+    if (body.op === 'load') return it ? { ok: true, item: { id: body.id, title: it.title, meta: it.meta, data: JSON.parse(it.json) } } : { ok: false, code: 'not_found', message: 'This item is no longer in your library.' };
+    if (body.op === 'delete') { var had = !!it; delete store[body.id]; return { ok: true, id: body.id, deleted: had }; }
+    if (body.op === 'save') {
+      var json = JSON.stringify(body.data || {});
+      if (!it && list.length >= max) return { ok: false, code: 'library_full', message: 'You have ' + list.length + ' saved ' + (kind === 'doc' ? 'documents' : 'brand kits') + ', the most allowed. Delete one you no longer need, then try again.' };
+      var id = it ? body.id : Math.random().toString(16).slice(2, 14) + Math.random().toString(16).slice(2, 14);
+      store[id] = { title: body.title || 'Untitled', meta: body.meta || {}, json: json, size: json.length, createdAt: it ? it.createdAt : now, updatedAt: now };
+      return { ok: true, id: id, savedAt: now, isNew: !it };
+    }
+    return { ok: false, code: 'invalid_input', message: 'Unknown library request.' };
+  }
   function mockBal() { return { plan: mockAcct.plan, pack: mockAcct.pack, total: mockAcct.plan + mockAcct.pack }; }
   function mockSpend(n) { var p = Math.min(mockAcct.plan, n); mockAcct.plan -= p; mockAcct.pack -= (n - p); }
   function mockApi(path, body, signal) {
@@ -2145,6 +2456,7 @@
       var t = setTimeout(function () {
         if (path === 'resend-key') { resolve({ ok: true, message: 'If this email has an account, we just sent a new access key. It can take a minute; check your spam folder too. Your old key stops working.' }); return; }
         if (body.key !== 'lmp_demo') { resolve({ ok: false, code: 'invalid_key', message: 'That access key isn\u2019t valid. Check the email we sent you, or ask for a new key.' }); return; }
+        if (path === 'library') { resolve(mockLibrary(body)); return; }
         if (path === 'session') { resolve({ ok: true, tier: 'Pro', status: 'active', balance: mockBal(), resetsOn: '2026-12-05', daily: { used: 0, limit: 100 } }); return; }
         if (path === 'outline') {
           if (mockBal().total < COSTS.outline) { resolve({ ok: false, code: 'insufficient_credits', message: 'You need 2 credits for this and have ' + mockBal().total + '.', needed: 2, balance: mockBal() }); return; }
