@@ -459,7 +459,7 @@
     if (lib.busy) return;
     if (!currentIsSaved() && lib.armed !== item.id) {
       // Try to keep the current work first; if that fails, ask for a second click.
-      lib.busy = item.id; render();
+      lib.busy = item.id; lib.busyAction = 'save-first'; render();
       saveDocToLibrary().then(function (ok) {
         lib.busy = '';
         if (ok) { openFromLibrary(item); return; }
@@ -469,7 +469,7 @@
       });
       return;
     }
-    lib.busy = item.id; lib.notice = null; render();
+    lib.busy = item.id; lib.busyAction = 'open'; lib.notice = null; render();
     api('library', { op: 'load', kind: 'doc', id: item.id }).then(function (r) {
       lib.busy = ''; lib.armed = '';
       var c = r.ok && r.item ? cleanLoadedDoc(r.item.data) : null;
@@ -486,7 +486,7 @@
   }
   function duplicateInLibrary(item) {
     if (lib.busy) return;
-    lib.busy = item.id; lib.notice = null; render();
+    lib.busy = item.id; lib.busyAction = 'copy'; lib.notice = null; render();
     api('library', { op: 'load', kind: 'doc', id: item.id }).then(function (r) {
       var c = r.ok && r.item ? cleanLoadedDoc(r.item.data) : null;
       if (!c) { lib.busy = ''; lib.notice = { kind: 'error', text: errorText(r, 'copy this document') }; render(); return null; }
@@ -501,7 +501,7 @@
     });
   }
   function deleteFromLibrary(item) {
-    lib.busy = item.id; lib.notice = null; render();
+    lib.busy = item.id; lib.busyAction = 'delete'; lib.notice = null; render();
     api('library', { op: 'delete', kind: 'doc', id: item.id }).then(function (r) {
       lib.busy = '';
       if (!r.ok) { lib.notice = { kind: 'error', text: errorText(r, 'delete this document') }; render(); return; }
@@ -529,11 +529,12 @@
         return h('li', { class: 'lmg-lib-item' + (current ? ' is-current' : ''), 'data-id': it.id }, [
           h('div', { class: 'lmg-lib-text' }, [
             h('span', { class: 'lmg-lib-title', text: it.title || 'Untitled document' }),
+            busy && lib.busyAction === 'delete' ? h('span', { class: 'lmg-lib-meta', text: 'Deleting\u2026' }) : null,
             h('span', { class: 'lmg-lib-meta', text: (current ? 'Open now \u00b7 ' : '') + info })
           ]),
           h('div', { class: 'lmg-lib-actions' }, [
-            button(busy ? 'Working\u2026' : (lib.armed === it.id ? 'Open anyway' : 'Open'), { small: true, disabled: !!lib.busy, onClick: function () { if (current && currentIsSaved()) { closeLibrary(); return; } openFromLibrary(it); } }),
-            button('Duplicate', { kind: 'ghost', small: true, disabled: !!lib.busy, onClick: function () { duplicateInLibrary(it); } }),
+            button(busy && lib.busyAction === 'save-first' ? 'Saving current\u2026' : busy && lib.busyAction === 'open' ? 'Opening\u2026' : (lib.armed === it.id ? 'Open anyway' : 'Open'), { small: true, disabled: !!lib.busy, onClick: function () { if (current && currentIsSaved()) { closeLibrary(); return; } openFromLibrary(it); } }),
+            button(busy && lib.busyAction === 'copy' ? 'Copying\u2026' : 'Duplicate', { kind: 'ghost', small: true, disabled: !!lib.busy, onClick: function () { duplicateInLibrary(it); } }),
             confirmButton('Delete', 'Click again to delete', function () { deleteFromLibrary(it); }, { kind: 'quiet', small: true, disabled: !!lib.busy })
           ])
         ]);
