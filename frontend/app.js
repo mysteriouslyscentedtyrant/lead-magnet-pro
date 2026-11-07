@@ -14,7 +14,7 @@
 
   var ROOT_ID = 'lead-magnet-generator';
   var STORAGE_KEY = 'lmp:v1';
-  var VERSION = '0.2.0';
+  var VERSION = '0.3.0';
 
   // ------------------------------------------------------------------ constants
   var FORMATS = {
@@ -1106,8 +1106,12 @@
     // -- download
     var dlBtn = button('Download PDF', { onClick: function () { downloadPdf(dlBtn); } });
     dlBtn.classList.add('lmg-btn--block');
+    var docxBtn = button('Download Word (.docx)', { kind: 'ghost', onClick: function () { downloadDocx(docxBtn); } });
+    docxBtn.classList.add('lmg-btn--block');
+    docxBtn.setAttribute('data-action', 'download-docx');
     var download = h('div', { class: 'lmg-ctrl lmg-ctrl--download lmg-dl' }, [
       dlBtn,
+      docxBtn,
       h('p', { class: 'lmg-help lmg-dl-hint', text: DL_HINT }),
       state.notice && state.notice.kind === 'error' ? notice(state.notice) : null
     ]);
@@ -1263,6 +1267,172 @@
       ])
     ]);
   }
+
+  // ------------------------------------------------------------------ Word (.docx) export: built in the browser, no server, no credits
+  // <docx>
+  // A .docx is a zip of small XML files. This writes the zip without compression, so no library is needed.
+  var CRC_TABLE = (function () {
+    var t = [], c, n, k;
+    for (n = 0; n < 256; n++) { c = n; for (k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[n] = c >>> 0; }
+    return t;
+  })();
+  function crc32(bytes) { var c = 0xFFFFFFFF; for (var i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function utf8Bytes(s) { return new TextEncoder().encode(s); }
+  function zipStore(files) {
+    var chunks = [], central = [], offset = 0;
+    function u16(v) { return [v & 255, (v >>> 8) & 255]; }
+    function u32(v) { return [v & 255, (v >>> 8) & 255, (v >>> 16) & 255, (v >>> 24) & 255]; }
+    files.forEach(function (f) {
+      var name = utf8Bytes(f.name), data = typeof f.data === 'string' ? utf8Bytes(f.data) : f.data, crc = crc32(data);
+      var head = [].concat(u32(0x04034B50), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21), u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0));
+      chunks.push(new Uint8Array(head), name, data);
+      central.push([].concat(u32(0x02014B50), u16(20), u16(20), u16(0x0800), u16(0), u16(0), u16(0x21), u32(crc), u32(data.length), u32(data.length),
+        u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset)), Array.prototype.slice.call(name));
+      offset += head.length + name.length + data.length;
+    });
+    var cdStart = offset, cdSize = 0;
+    central.forEach(function (c) { chunks.push(new Uint8Array(c)); cdSize += c.length; });
+    chunks.push(new Uint8Array([].concat(u32(0x06054B50), u16(0), u16(0), u16(files.length), u16(files.length), u32(cdSize), u32(cdStart), u16(0))));
+    var total = chunks.reduce(function (n, c) { return n + c.length; }, 0), out = new Uint8Array(total), p = 0;
+    chunks.forEach(function (c) { out.set(c, p); p += c.length; });
+    return out;
+  }
+  function xmlEsc(s) { return String(s == null ? '' : s).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function buildDocx(d, b, L, size) {
+    var hex = function (c) { return String(c || '#000000').replace('#', '').toUpperCase(); };
+    var P = hex(b.colors.primary), A = hex(b.colors.accent);
+    var arabic = !!(d.meta && /arab/i.test(d.meta.language || ''));
+    var serifHeading = b.fonts && /Fraunces|DM Serif/i.test(b.fonts.heading || '');
+    var HF = arabic ? 'Arial' : serifHeading ? 'Georgia' : 'Calibri', BF = arabic ? 'Arial' : 'Calibri';
+    var tw = function (mm) { return Math.round(mm * 56.7); };
+    var nums = [], links = [];            // numbered lists (each restarts at 1), hyperlinks
+    var bidi = arabic ? '<w:bidi/>' : '', rtl = arabic ? '<w:rtl/>' : '';
+    function run(text, o) {
+      o = o || {};
+      return '<w:r><w:rPr>' + (o.bold ? '<w:b/>' : '') + (o.italic ? '<w:i/>' : '') + (o.caps ? '<w:caps/>' : '') +
+        (o.color ? '<w:color w:val="' + o.color + '"/>' : '') + (o.size ? '<w:sz w:val="' + o.size + '"/>' : '') + rtl +
+        '</w:rPr><w:t xml:space="preserve">' + xmlEsc(text) + '</w:t></w:r>';
+    }
+    function para(style, inner, extra) { return '<w:p><w:pPr><w:pStyle w:val="' + style + '"/>' + (extra || '') + bidi + '</w:pPr>' + inner + '</w:p>'; }
+    function textPara(style, text, o, extra) { return para(style, run(text, o), extra); }
+    var body = [];
+    var checklist = d.format === 'checklist';
+    // cover
+    body.push(textPara('Title', d.title));
+    if (d.subtitle) body.push(textPara('Subtitle', d.subtitle));
+    if (b.authorName && b.authorName.trim()) body.push(textPara('Byline', b.authorName.trim()));
+    if (!checklist) body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+    function kicker(sec) {
+      var n = d.sections.filter(function (s) { return s.type === sec.type; }).indexOf(sec) + 1;
+      return { intro: L.intro, conclusion: L.conclusion, problem: L.problem, mistakes: L.mistakes, next_step: L.next_step, chapter: L.chapter + ' ' + n, step: L.step + ' ' + n, group: '' }[sec.type] || '';
+    }
+    function listPara(kind, text, numId) {
+      var pre = kind === 'checklist' ? '☐  ' : '';
+      return para('ListParagraph', run(pre + text), kind === 'checklist' ? '' : '<w:numPr><w:ilvl w:val="0"/><w:numId w:val="' + numId + '"/></w:numPr>');
+    }
+    d.sections.forEach(function (s) {
+      var k = kicker(s);
+      if (k) body.push(textPara('Kicker', k, { caps: true }));
+      body.push(textPara('Heading1', s.heading));
+      (s.blocks || []).forEach(function (bl) {
+        switch (bl.type) {
+          case 'paragraph': body.push(textPara('Normal', bl.text)); break;
+          case 'subheading': body.push(textPara('Heading2', bl.text)); break;
+          case 'bullets': case 'steps': case 'checklist': {
+            if (bl.text) body.push(textPara('Normal', bl.text, { bold: true }));
+            var numId = bl.type === 'steps' ? (nums.push(1), 3 + nums.length - 1) : 1;
+            (bl.items || []).forEach(function (it) { body.push(listPara(bl.type, it, numId)); });
+            break;
+          }
+          case 'tip': case 'warning': case 'example':
+            body.push(textPara('BoxLabel', L[bl.type], { caps: true }));
+            body.push(textPara('Box', bl.text)); break;
+          case 'template':
+            body.push(textPara('BoxLabel', bl.text || 'Template', { caps: true }));
+            (bl.items || []).forEach(function (it) { body.push(textPara('Template', it)); }); break;
+        }
+      });
+    });
+    var c = d.cta;
+    if (c && (c.heading || c.text)) {
+      body.push(textPara('Heading1', c.heading || ''));
+      if (c.text) body.push(textPara('Normal', c.text));
+      if (c.buttonLabel) {
+        if (c.url && /^https?:\/\//i.test(c.url)) {
+          links.push(c.url);
+          body.push(para('Normal', '<w:hyperlink r:id="rIdL' + links.length + '"><w:r><w:rPr><w:rStyle w:val="Hyperlink"/><w:b/></w:rPr><w:t xml:space="preserve">' + xmlEsc(c.buttonLabel) + ' →</w:t></w:r></w:hyperlink>'));
+        } else body.push(textPara('Normal', c.buttonLabel, { bold: true, color: P }));
+      }
+    }
+    var W = tw(size.w), H = tw(size.h), M = tw(20);
+    var sect = '<w:sectPr><w:footerReference w:type="default" r:id="rIdF"/><w:pgSz w:w="' + W + '" w:h="' + H + '"/><w:pgMar w:top="' + M + '" w:right="' + M + '" w:bottom="' + M + '" w:left="' + M + '" w:header="708" w:footer="708" w:gutter="0"/>' + (arabic ? '<w:bidi/>' : '') + '</w:sectPr>';
+    var NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
+    var document_ = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document ' + NS + '><w:body>' + body.join('') + sect + '</w:body></w:document>';
+    var font = function (f) { return '<w:rFonts w:ascii="' + f + '" w:hAnsi="' + f + '" w:cs="' + f + '" w:eastAsia="' + f + '"/>'; };
+    function style(id, name, based, ppr, rpr, next) {
+      return '<w:style w:type="paragraph" w:styleId="' + id + '"><w:name w:val="' + name + '"/>' + (based ? '<w:basedOn w:val="' + based + '"/>' : '') + (next ? '<w:next w:val="' + next + '"/>' : '') + '<w:qFormat/><w:pPr>' + ppr + '</w:pPr><w:rPr>' + rpr + '</w:rPr></w:style>';
+    }
+    var styles = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ' + NS + '><w:docDefaults><w:rPrDefault><w:rPr>' + font(BF) + '<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="' + (arabic ? 'ar-SA' : 'en-US') + '"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="300" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>' +
+      '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +
+      style('Title', 'Title', 'Normal', '<w:spacing w:before="2400" w:after="240" w:line="240" w:lineRule="auto"/>', font(HF) + '<w:b/><w:color w:val="' + P + '"/><w:sz w:val="64"/>', 'Normal') +
+      style('Subtitle', 'Subtitle', 'Normal', '<w:spacing w:after="240"/>', '<w:color w:val="5B5F7A"/><w:sz w:val="30"/>', 'Normal') +
+      style('Byline', 'Byline', 'Normal', '<w:spacing w:before="480"/>', '<w:b/><w:color w:val="' + A + '"/><w:sz w:val="24"/>', 'Normal') +
+      style('Kicker', 'Kicker', 'Normal', '<w:keepNext/><w:spacing w:before="360" w:after="40"/>', '<w:b/><w:color w:val="' + A + '"/><w:spacing w:val="20"/><w:sz w:val="18"/>', 'Heading1') +
+      style('Heading1', 'heading 1', 'Normal', '<w:keepNext/><w:spacing w:before="0" w:after="160" w:line="240" w:lineRule="auto"/><w:outlineLvl w:val="0"/>', font(HF) + '<w:b/><w:color w:val="' + P + '"/><w:sz w:val="40"/>', 'Normal') +
+      style('Heading2', 'heading 2', 'Normal', '<w:keepNext/><w:spacing w:before="240" w:after="80"/><w:outlineLvl w:val="1"/>', font(HF) + '<w:b/><w:color w:val="' + P + '"/><w:sz w:val="28"/>', 'Normal') +
+      style('ListParagraph', 'List Paragraph', 'Normal', '<w:spacing w:after="80"/><w:ind w:left="720" w:hanging="360"/>', '', 'Normal') +
+      style('BoxLabel', 'Box Label', 'Normal', '<w:keepNext/><w:pBdr><w:left w:val="single" w:sz="24" w:space="8" w:color="' + A + '"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="F3F4F8"/><w:spacing w:before="160" w:after="0"/><w:ind w:left="200"/>', '<w:b/><w:color w:val="' + A + '"/><w:sz w:val="18"/>', 'Box') +
+      style('Box', 'Box', 'Normal', '<w:pBdr><w:left w:val="single" w:sz="24" w:space="8" w:color="' + A + '"/></w:pBdr><w:shd w:val="clear" w:color="auto" w:fill="F3F4F8"/><w:spacing w:after="160"/><w:ind w:left="200"/>', '', 'Normal') +
+      style('Template', 'Template', 'Normal', '<w:pBdr><w:top w:val="single" w:sz="4" w:space="4" w:color="C9CCDA"/><w:left w:val="single" w:sz="4" w:space="6" w:color="C9CCDA"/><w:bottom w:val="single" w:sz="4" w:space="4" w:color="C9CCDA"/><w:right w:val="single" w:sz="4" w:space="6" w:color="C9CCDA"/></w:pBdr><w:spacing w:after="100"/><w:ind w:left="200" w:right="200"/>', '', 'Normal') +
+      style('Footer', 'footer', 'Normal', '<w:spacing w:after="0"/>', '<w:color w:val="8A8CA0"/><w:sz w:val="17"/>', 'Normal') +
+      '<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink"/><w:rPr><w:color w:val="' + A + '"/><w:u w:val="single"/></w:rPr></w:style></w:styles>';
+    function absNum(id, fmt, text) {
+      return '<w:abstractNum w:abstractNumId="' + id + '"><w:multiLevelType w:val="singleLevel"/><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="' + fmt + '"/><w:lvlText w:val="' + text + '"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>' + (fmt === 'bullet' ? '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:hint="default"/><w:color w:val="' + A + '"/></w:rPr>' : '') + '</w:lvl></w:abstractNum>';
+    }
+    var numbering = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering ' + NS + '>' + absNum(0, 'bullet', '\u2022') + absNum(1, 'decimal', '%1.') +
+      '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
+      nums.map(function (_, i) { return '<w:num w:numId="' + (3 + i) + '"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>'; }).join('') + '</w:numbering>';
+    var footerText = (b.authorName || '').trim();
+    var footer = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:ftr ' + NS + '><w:p><w:pPr><w:pStyle w:val="Footer"/>' + bidi + '<w:jc w:val="' + (arabic ? 'left' : 'right') + '"/></w:pPr>' +
+      (footerText ? '<w:r><w:t xml:space="preserve">' + xmlEsc(footerText) + '    </w:t></w:r>' : '') +
+      '<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> PAGE </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p></w:ftr>';
+    var R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+    var docRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rIdS" Type="' + R + '/styles" Target="styles.xml"/><Relationship Id="rIdN" Type="' + R + '/numbering" Target="numbering.xml"/><Relationship Id="rIdF" Type="' + R + '/footer" Target="footer1.xml"/>' +
+      links.map(function (u, i) { return '<Relationship Id="rIdL' + (i + 1) + '" Type="' + R + '/hyperlink" Target="' + xmlEsc(u) + '" TargetMode="External"/>'; }).join('') + '</Relationships>';
+    var types = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/><Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>' +
+      '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>';
+    var rels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="' + R + '/officeDocument" Target="word/document.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>';
+    var core = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>' + xmlEsc(d.title) + '</dc:title><dc:creator>' + xmlEsc(footerText || 'Lead Magnet') + '</dc:creator></cp:coreProperties>';
+    return zipStore([
+      { name: '[Content_Types].xml', data: types }, { name: '_rels/.rels', data: rels }, { name: 'docProps/core.xml', data: core },
+      { name: 'word/document.xml', data: document_ }, { name: 'word/styles.xml', data: styles }, { name: 'word/numbering.xml', data: numbering },
+      { name: 'word/footer1.xml', data: footer }, { name: 'word/_rels/document.xml.rels', data: docRels }
+    ]);
+  }
+  // </docx>
+  function downloadDocx(btn) {
+    var d = state.doc, c = d.cta;
+    if (c && c.url && !validUrl(c.url)) {
+      state.errors = { 'cta-url': 'Enter a full link that starts with https://, for example https://your-site.com' };
+      pendingFocus = '[data-field="cta-url"]';
+      render(); return;
+    }
+    var hint = btn.parentNode && btn.parentNode.querySelector('.lmg-dl-hint');
+    try {
+      var b = safeBranding(d.branding);
+      var bytes = buildDocx(d, b, labelsFor(d.meta && d.meta.language), PAGE_SIZES[b.pageSize]);
+      var filename = pdfFileName(d.title).replace(/\.pdf$/, '.docx');
+      saveBlob(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }), filename);
+      if (hint) hint.textContent = 'Downloaded: ' + filename + '. Open it in Word, Google Docs or Pages and keep editing.';
+    } catch (e) {
+      if (hint) hint.textContent = 'We couldn’t create the Word file. Please try again, or use the PDF.';
+    }
+  }
+
 
   // ------------------------------------------------------------------ PDF download: real file from the server, print window as backup
   function pdfFileName(title) {

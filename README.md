@@ -1,6 +1,6 @@
 # Lead Magnet Pro (frontend)
 
-The paid version of the AI Lead Magnet Generator: customers buy a subscription or a credit pack, receive an access key by email, and spend credits to create ebooks, guides and checklists as PDFs.
+The paid version of the AI Lead Magnet Generator: customers buy a subscription or a credit pack, receive an access key by email, and spend credits to create ebooks, guides and checklists as PDFs or Word (.docx) files.
 
 This repo is **public** and holds only what the browser needs and nothing secret: the page code (served by jsDelivr), the document schema and the PDF actor. The prompts, the n8n workflows and the billing logic live in a separate **private** backend repo.
 
