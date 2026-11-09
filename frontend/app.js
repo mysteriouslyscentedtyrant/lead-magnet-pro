@@ -14,7 +14,7 @@
 
   var ROOT_ID = 'lead-magnet-generator';
   var STORAGE_KEY = 'lmp:v1';
-  var VERSION = '0.4.0';
+  var VERSION = '0.4.1';
 
   // ------------------------------------------------------------------ constants
   var FORMATS = {
@@ -212,7 +212,16 @@
   // Every call carries the access key; every answer may carry the new balance.
   function api(path, body, signal) {
     var withKey = Object.assign({}, body, account.key ? { key: account.key } : {});
-    return rawApi(path, withKey, signal).then(function (r) { absorb(r); return r; });
+    return withRetry(path, withKey, signal).then(function (r) { absorb(r); return r; });
+  }
+  // Read-only calls (sign-in, listing and opening saved items) are tried once more after a network blip.
+  // Calls that spend credits are never repeated automatically.
+  function readOnly(path, body) { return path === 'session' || (path === 'library' && (body.op === 'list' || body.op === 'load')); }
+  function withRetry(path, body, signal) {
+    return rawApi(path, body, signal).then(function (r) {
+      if (!r || r.code !== 'network' || !readOnly(path, body)) return r;
+      return new Promise(function (res) { setTimeout(res, 1200); }).then(function () { return rawApi(path, body, signal); });
+    });
   }
   function absorb(r) {
     if (!r) return;
@@ -2028,7 +2037,7 @@
     '@media screen { .lmt { padding: 28px 0 40px; } .lmt-sheet { width: var(--pw); min-height: var(--ph); margin: 0 auto 28px; background: #fff; padding: var(--mt) var(--mx) var(--mb); box-shadow: 0 1px 2px rgba(24,28,57,.08), 0 10px 28px -10px rgba(24,28,57,.25); position: relative; }',
     '  .lmt-sheet--cover { height: var(--ph); padding: 0; overflow: hidden; } .lmt-sheet--single { min-height: var(--ph); } }',
     '@media print { body { background: none; } .lmt-sheet { break-before: page; } .lmt-sheet:first-child { break-before: auto; }',
-    '  .lmt-sheet--cover { page: lmt-cover; width: var(--pw); height: calc(var(--ph) - 1mm); overflow: hidden; break-after: page; }',
+    '  .lmt-sheet--cover { page: lmt-cover; width: var(--pw); height: var(--ph); overflow: hidden; break-after: page; }',
     '  .lmt-sheet--cta { min-height: calc(var(--ph) - 18mm - 20mm - 2mm); }',
     '  .lmt-f-checklist .lmt-sheet--single { height: calc(var(--ph) - 1mm); overflow: hidden; } }',
     /* cover (shared) */
