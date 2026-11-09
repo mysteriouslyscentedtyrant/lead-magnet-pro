@@ -34,9 +34,9 @@ Replace SECRET with `BILLING_SECRET`. The address must end exactly at the last w
 | `lmp-pro` | New sale | `...&type=subscribe&plan=pro` |
 | `lmp-scale` | New sale | `...&type=subscribe&plan=scale` |
 | `lmp-credits` | New sale | `...&type=pack&plan=pack100` |
-| each plan | Subscription cancelled | `...&type=cancel` |
-| each plan | Subscription ended / refunded | `...&type=ended` |
-| each plan | Payment failed | `...&type=payment-failed` |
+| `lmp-starter`, `lmp-pro`, `lmp-scale` | Sale canceled | `...&type=ended` |
+| `lmp-credits` | Sale canceled (a refund) | `...&type=pack-refund&plan=pack100` |
+| any | Payment failed | not connected (on purpose) |
 
 ## Editing the text
 
