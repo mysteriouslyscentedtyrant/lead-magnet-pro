@@ -1,0 +1,114 @@
+<!-- Lead Magnet Pro: thank-you page after payment (page slug: lmp-welcome). Paste into one Raw HTML element. -->
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+.lmpo{--ink:#181C39;--slate:#5E6075;--soft:#8A8CA0;--band:#F5F6F9;--line:#E2E4EC;--blue:#2F54EB;--lime:#B9F27C;--lime-ink:#1F3D10;
+  font-family:Outfit,system-ui,-apple-system,"Segoe UI",sans-serif;color:var(--ink);line-height:1.5;-webkit-font-smoothing:antialiased;text-align:left}
+.lmpo *,.lmpo *::before,.lmpo *::after{box-sizing:border-box}
+:where(.lmpo) :where(h1,h2,h3,p,ul,ol){margin:0;padding:0}
+:where(.lmpo) a{color:inherit}
+.lmpo-wrap{max-width:1100px;margin:0 auto;padding:0 24px}
+.lmpo-switch{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;padding:24px 16px 0}
+.lmpo-switch a{padding:8px 16px;border-radius:999px;border:1px solid var(--line);font-size:14px;font-weight:500;text-decoration:none;color:var(--slate);background:#fff}
+.lmpo-switch a:hover{border-color:var(--ink);color:var(--ink)}
+.lmpo-switch a.is-on{background:var(--ink);border-color:var(--ink);color:#fff}
+.lmpo-hero{display:grid;grid-template-columns:1fr 1.15fr;gap:48px;align-items:start;padding-top:48px;padding-bottom:64px}
+.lmpo-kicker{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--blue)}
+.lmpo-kicker::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--blue)}
+.lmpo h1{margin-top:14px;font-size:48px;line-height:1.08;font-weight:700;letter-spacing:-.02em}
+.lmpo-lead{margin-top:18px;font-size:17px;color:var(--slate);max-width:460px}
+.lmpo-amount{margin-top:28px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.lmpo-amount strong{font-size:40px;line-height:1;font-weight:700;letter-spacing:-.02em}
+.lmpo-amount span{font-size:15px;color:var(--slate)}
+.lmpo-note{margin-top:8px;font-size:14px;color:var(--soft)}
+.lmpo-card{border:1px solid var(--line);border-radius:14px;padding:22px 24px;background:#fff}
+.lmpo-checks{list-style:none;display:grid;grid-template-columns:1fr 1fr;gap:10px 24px}
+.lmpo-checks li{position:relative;padding-left:26px;font-size:14px}
+.lmpo-checks li::before{content:"";position:absolute;left:2px;top:4px;width:12px;height:7px;border-left:2px solid var(--blue);border-bottom:2px solid var(--blue);transform:rotate(-45deg)}
+.lmpo-minis{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.lmpo-mini{background:var(--band);border-radius:12px;padding:14px 16px;font-size:13px;color:var(--slate)}
+.lmpo-mini strong{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:14px;color:var(--ink);font-weight:600}
+.lmpo-mini svg{flex:none;width:18px;height:18px}
+.lmpo-band{background:var(--band);padding:72px 0}
+.lmpo h2{font-size:36px;line-height:1.15;font-weight:700;letter-spacing:-.015em;text-align:center;max-width:720px;margin:0 auto}
+.lmpo-sub{margin:12px auto 0;max-width:600px;text-align:center;color:var(--slate);font-size:16px}
+.lmpo-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:40px}
+.lmpo-feat{background:#fff;border-radius:14px;padding:24px}
+.lmpo-icon{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;background:var(--lime);color:var(--lime-ink)}
+.lmpo-icon svg{width:18px;height:18px}
+.lmpo-feat h3{margin-top:18px;font-size:17px;font-weight:600}
+.lmpo-feat p{margin-top:8px;font-size:14px;color:var(--slate)}
+.lmpo-credits{padding:72px 24px}
+.lmpo-costs{list-style:none;display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:36px}
+.lmpo-costs li{border:1px solid var(--line);border-radius:14px;padding:20px;text-align:center}
+.lmpo-costs b{display:block;font-size:26px;font-weight:700;letter-spacing:-.01em}
+.lmpo-costs span{display:block;margin-top:4px;font-size:14px;color:var(--slate)}
+.lmpo-costs-note{margin-top:20px;text-align:center;font-size:14px;color:var(--slate)}
+.lmpo-costs-note a{color:var(--blue);font-weight:600;text-decoration:none}
+.lmpo-costs-note a:hover{text-decoration:underline}
+.lmpo-formhead{background:var(--band);padding:64px 24px 28px;text-align:center}
+.lmpo-formhead .lmpo-sub{margin-top:10px}
+.lmpo-after{background:var(--band);padding:20px 24px 56px;text-align:center;font-size:13px;color:var(--soft)}
+.lmpo-after p+p{margin-top:8px}
+.lmpo-after a{color:var(--slate)}
+.lmpo-trust{display:flex;justify-content:center;gap:10px 28px;flex-wrap:wrap;margin-bottom:22px;font-size:14px;color:var(--slate)}
+.lmpo-trust span{display:inline-flex;align-items:center;gap:8px}
+.lmpo-trust svg{width:16px;height:16px;color:var(--blue)}
+.lmpo-foot{border-top:1px solid var(--line);background:#fff;padding:24px;font-size:13px;color:var(--soft)}
+.lmpo-foot .lmpo-wrap{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:0}
+.lmpo-foot a{color:var(--slate);text-decoration:none}
+.lmpo-foot a:hover{text-decoration:underline}
+.lmpo-foot nav{display:flex;gap:20px;flex-wrap:wrap}
+.lmpo-welcome{max-width:720px;margin:0 auto;padding:72px 24px 80px;text-align:center}
+.lmpo-done{display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;border-radius:50%;background:var(--lime);color:var(--lime-ink)}
+.lmpo-done svg{width:30px;height:30px}
+.lmpo-welcome h1{font-size:44px}
+.lmpo-welcome .lmpo-lead{margin:16px auto 0}
+.lmpo-steps{list-style:none;counter-reset:s;display:grid;gap:12px;margin-top:36px;text-align:left}
+.lmpo-steps li{counter-increment:s;position:relative;background:var(--band);border-radius:14px;padding:18px 20px 18px 64px}
+.lmpo-steps li::before{content:counter(s);position:absolute;left:20px;top:16px;width:30px;height:30px;border-radius:50%;background:var(--ink);color:#fff;font-weight:600;font-size:15px;display:flex;align-items:center;justify-content:center}
+.lmpo-steps strong{display:block;font-weight:600}
+.lmpo-steps span{display:block;margin-top:2px;font-size:14px;color:var(--slate)}
+.lmpo-btn{display:inline-block;margin-top:32px;padding:14px 28px;border-radius:10px;background:var(--blue);color:#fff!important;font-weight:600;font-size:16px;text-decoration:none}
+.lmpo-btn:hover{filter:brightness(1.08)}
+.lmpo-small{margin-top:24px;font-size:14px;color:var(--slate)}
+.lmpo-small+.lmpo-small{margin-top:8px}
+.lmpo code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em;background:#fff;border:1px solid var(--line);border-radius:6px;padding:1px 6px}
+@media (max-width:900px){
+  .lmpo-hero{grid-template-columns:1fr;gap:32px;padding-top:36px;padding-bottom:48px}
+  .lmpo h1{font-size:38px}
+  .lmpo-grid{grid-template-columns:1fr 1fr}
+  .lmpo-costs{grid-template-columns:1fr 1fr}
+}
+@media (max-width:560px){
+  .lmpo-wrap{padding-left:16px;padding-right:16px}
+  .lmpo h1{font-size:32px}
+  .lmpo h2{font-size:28px}
+  .lmpo-checks,.lmpo-minis,.lmpo-grid{grid-template-columns:1fr}
+  .lmpo-band,.lmpo-credits{padding-top:56px;padding-bottom:56px}
+  .lmpo-credits{padding-left:16px;padding-right:16px}
+  .lmpo-formhead{padding:48px 16px 24px}
+  .lmpo-card{padding:18px}
+  .lmpo-welcome h1{font-size:34px}
+}
+</style>
+<div class="lmpo">
+  <section class="lmpo-welcome">
+    <span class="lmpo-done"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>
+    <h1 style="margin-top:22px">You’re in. Check your inbox.</h1>
+    <p class="lmpo-lead">Thank you for your purchase. Your access key is on its way to the email you used at checkout.</p>
+    <ol class="lmpo-steps">
+      <li><strong>Open the email “Here is your access key”</strong><span>It usually arrives within a minute. Check your spam or promotions folder too.</span></li>
+      <li><strong>Copy your key</strong><span>It starts with <code>lmp_</code>. Keep the email: it is your login.</span></li>
+      <li><strong>Open the tool and paste it</strong><span>Your balance appears at the top, and you can create your first lead magnet right away.</span></li>
+    </ol>
+    <a class="lmpo-btn" href="/lead-magnet-pro">Open Lead Magnet Pro</a>
+    <p class="lmpo-small">Already had a key? It still works: your new credits are already on it.</p>
+    <p class="lmpo-small">No email after 5 minutes? On the tool’s key screen, click “Send me a new one” and enter the same email.</p>
+  </section>
+  <footer class="lmpo-foot">
+    <div class="lmpo-wrap">
+      <span>© 2026 Lead Magnet Pro</span>
+      <nav aria-label="More"><a href="/lead-magnet-pro">The tool</a><a href="/lmp-terms">Terms</a></nav>
+    </div>
+  </footer>
+</div>
